@@ -3,22 +3,29 @@
 Everything in this folder was built and tested in one session. Three things need a human
 before the day, and one is optional. Each takes a few minutes.
 
-## 1. Put the folder on GitHub and tag it
+## 1. GitHub release (done) and the campus rate limit (needs you)
 
-The notebook's setup cell (and the README's Colab badge) download the code from a pinned
-release: `michaelbolebrukh/quantsoc-ml-for-quant-finance`, tag `v1.0.0`. Until that
-repository and tag exist, the setup cell cannot find the package on Colab (local runs work).
+The repository is public at `michaelbolebrukh/quantsoc-ml-for-quant-finance`. The pinned release the
+notebook's setup cell and the README's Colab badge use is `v1.0.0`, published as a **branch** of that
+name pointing at the release commit (the session that built this could push branches but not tags;
+GitHub resolves a branch name in the same URLs). Do not move that branch during the workshop week. If
+you later want a real tag instead, delete the branch first (`git push origin :refs/heads/v1.0.0`), then
+`git tag v1.0.0 <commit> && git push origin v1.0.0`, so the name is never ambiguous.
 
-    git remote add origin git@github.com:michaelbolebrukh/quantsoc-ml-for-quant-finance.git
-    git push -u origin main
-    git tag v1.0.0 && git push origin v1.0.0
+**Do not hand out the GitHub Colab link on campus.** Colab opens a GitHub notebook through GitHub's
+API, which allows about 60 anonymous requests per hour per public IP address, and the whole University
+of Edinburgh network shares one address. A room of people clicking it gets "API rate limit exceeded".
+Open the notebook from Google Drive instead, which has no such limit:
 
-If the repository is called something else, change `OWNER, REPO, REVISION` in the notebook's
-first code cell and the badge link in `README.md`, then re-tag.
+1. Download `notebooks/workshop2_student.ipynb` from the repository.
+2. Upload it to the QuantSoc Google Drive, open it once (it opens in Colab), and set sharing to
+   "Anyone with the link: Viewer".
+3. Copy that Colab address (`https://colab.research.google.com/drive/...`) and point the short link
+   **quant-soc.com/links/workshop-2** (shown on slide 1) at it.
+4. Test the short link on campus wifi and on a phone hotspot.
 
-Slide 1 also shows the short link **quant-soc.com/links/workshop-2** for the notebook (the same pattern
-as Workshop 1's `links/workshop-1`). Create that managed link on the site and point it at the Colab URL in
-`README.md` (the badge), or change the text on slide 1 in `deck/slides.yaml` and rebuild.
+Participants then use File, Save a copy in Drive, as before. The setup cell still downloads the code
+from GitHub's archive endpoint, which is a plain download and not the rate-limited API.
 
 ## 2. Check the two social QR codes once
 

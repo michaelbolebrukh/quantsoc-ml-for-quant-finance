@@ -8,6 +8,10 @@ the value in your own message.
 **"Warning: This notebook was not authored by Google"**: choose `Run anyway`. The Setup cell only downloads this
 workshop's pinned release from GitHub.
 
+**Colab: "Notebook loading error ... API rate limit exceeded"**: Colab fetched the notebook through GitHub's
+API, and everyone on the same network (all of campus wifi) shares one hourly allowance. Use the short link
+from slide 1 instead (it opens the Google Drive copy), or wait an hour, or press "Authorise with GitHub".
+
 **Setup cell: `HTTP Error 404`**: the release tag in the Setup cell (`REVISION = "v1.0.0"`) is not published on
 GitHub. Instructor: push the tag. Participants: ask for the current link, or upload the release ZIP through the
 Files pane, unzip it to `/content/workshop` and run Setup again.
