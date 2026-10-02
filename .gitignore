@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+.env.*
+!.env.example
+.venv/
+deck/qa_preview/
+exports/
+*.zip
+.pytest_cache/

@@ -1,0 +1,592 @@
+# Bonus section of the Workshop 2 deck: core principles of learning theory. Appended by build_deck.py after the
+# last slide of slides.yaml, in the same file and style. Same markup and visual kinds as slides.yaml.
+# chapters: the five steps of this section's own strip (the same mechanism as Part 1's process strip).
+# seen: the id of a Part 1 slide this slide builds on, drawn as a "Seen in Part 1: slide N" chip with the live number.
+# optional: true draws a small "optional" tag and says so at the top of the notes; skip these when short of time.
+# minutes: [start, end] on the bonus section's own clock, contiguous from 0 to BONUS_MINUTES (build_deck.py).
+# Numbers: slide text never quotes a number from the B1..B9 figures (the figures carry them). The notes quote the
+#   measured values from docs/bonus-results.md (written by deck/make_bonus_figures.py); change both together.
+#   Numbers from Part 1 come from docs/core-results.md ("Numbers the notebook prints").
+
+chapters:
+  - ["Generalisation", "does it work on data it never saw?"]
+  - ["Honest testing", "fit, choose and judge on separate data"]
+  - ["Trade-offs", "bias, variance and the noise floor"]
+  - ["Model families", "what each kind of model is good at"]
+  - ["Finance", "how markets change the rules"]
+
+slides:
+  - id: bonus_divider
+    stage: ahead
+    title: "Bonus: core principles of learning theory"
+    layout: wide
+    visual:
+      kind: pipeline      # steps: the `chapters` list above
+    lines:
+      - "The ideas underneath Part 1: why a model that fits the past can fail on the future, and what to do about it."
+    minutes: [0, 1]
+    notes: >-
+      This bonus section steps back from the code and asks why the rules of Part 1 exist.
+      It has five short chapters, shown in the strip at the top of every slide from now on: generalisation, honest testing, trade-offs, model families, and what finance changes.
+      Learning theory is the study of when a rule learned from examples will keep working on new examples, and it is the reason for every warning we gave in Part 1.
+      Where a slide builds on something from Part 1, a small blue tag at the top right says which slide.
+      Three slides are marked optional; skip them if time is short, nothing later depends on them.
+
+  - id: one_question
+    seen: overfit
+    stage: Generalisation
+    title: "The one question"
+    layout: side
+    define:
+      - ["Generalisation", "doing well on data the model never saw, not just on the data it learned from."]
+    lines:
+      - "**Training error:** how wrong the model is on the examples it learned from."
+      - "**Test error:** how wrong it is on new examples. This is the one that matters."
+      - "Training error almost always flatters, because the model has already seen the answers."
+    visual:
+      kind: result
+      id: "F2"
+      file: "F2_noise.png"
+      caption: "Part 1's noise experiment: a high training score, a test score below zero"
+    reading: 'Hastie, Tibshirani, Friedman (2009), The Elements of Statistical Learning, 2nd ed., Springer, ch. 7, Model Assessment and Selection'
+    reading_full:
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+    minutes: [1, 2]
+    notes: >-
+      All of learning theory comes down to one question: will this rule work on data it has never seen?
+      That ability is called generalisation.
+      Training error is how wrong the model is on the examples it learned from; test error is how wrong it is on new examples, and only the test error tells you what will happen next.
+      Hastie, Tibshirani and Friedman open their chapter on model assessment with exactly this distinction, and show that training error keeps falling as a model gets more flexible while test error does not.
+      You saw it in Part 1: the unbraked forest scored about 48 to 60 percent R squared on its training rows and below zero on the test years. The picture on the right is that experiment again.
+
+  - id: assumption
+    seen: textbook_vs_finance
+    stage: Generalisation
+    title: "What every model assumes"
+    layout: side
+    lines:
+      - "Every model assumes the future comes from the **same process** as the past it learned from."
+      - "In a textbook that is true by construction. In markets it is not: rules, players and regimes change."
+      - "So test on later years, expect results to fade, and prefer models that fail gently."
+    visual:
+      kind: cards
+      cards:
+        - ["Same process", "past and future examples are drawn the same way, so test error predicts future error"]
+        - ["Regimes change", "a crisis, a new regulation, a crowded trade: the process itself moves"]
+        - ["What we do", "walk-forward tests, regular retraining, and simple models with few knobs"]
+    reading: 'Hastie et al. (2009), The Elements of Statistical Learning, ch. 7; López de Prado (2018), J. Portfolio Management 44(6), 120-133'
+    reading_full:
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+      - 'López de Prado, M. (2018). "The 10 Reasons Most Machine Learning Funds Fail." The Journal of Portfolio Management, 44(6), 120-133.'
+    minutes: [2, 3]
+    notes: >-
+      Behind every test score sits one assumption: the new data comes from the same process as the old data.
+      Statisticians say the examples are drawn from the same distribution, which just means the same random mechanism produces them.
+      If that holds, the error on a fair test set is a good estimate of the error you will see tomorrow; the theory in Hastie, Tibshirani and Friedman's chapter 7 rests on it.
+      Markets break it. The rules change, the people trading change, and when a pattern becomes well known, traders crowd into it and it can fade. A lasting change in how the market behaves is called a regime change.
+      This is the data row of the table on slide {slide:textbook_vs_finance}, and it is why testing on later years matters. López de Prado warns that a test drawn from the same years cannot reveal a change of regime, and he recommends purged cross-validation over a single walk-forward path.
+
+  - id: three_sets
+    seen: time_split
+    stage: Honest testing
+    title: "Train, validation, test"
+    layout: full
+    visual:
+      kind: sets
+      sets:
+        - ["Train", "fit", "the model learns its parameters, such as the splits of each tree, from these rows.", 60]
+        - ["Validation", "choose", "compare settings, such as tree depth, and keep the best one.", 20]
+        - ["Test", "judge", "score the final choice once, and report that number.", 20]
+    lines:
+      - "Three sets, three jobs, in time order. Choose with the test set and it quietly becomes a second validation set."
+      - "Part 1 had only train and test, so every knob you tuned on the test years spent a little of them."
+    reading: 'Hastie et al. (2009), The Elements of Statistical Learning, ch. 7, Model Assessment and Selection'
+    reading_full:
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+    minutes: [3, 4]
+    notes: >-
+      An honest workflow splits the data three ways, each with one job.
+      The training set is for fitting: the model learns its parameters there, the numbers it adjusts itself, such as where each tree splits.
+      The validation set is for choosing: settings that we pick rather than the model, called hyperparameters, such as the depth of a tree, are compared on it, and the best one is kept.
+      The test set is for judging: the final choice is scored on it once, and that number is the one you report.
+      In finance the three sets follow time order, oldest first, with gaps between them.
+      If you look at the test score and then change something, the test set has started doing the validation set's job, and its score is no longer an honest estimate. Part 1 used only a training and a test period to keep things short, which means every knob you tuned while watching the test years spent a little of their honesty.
+
+  - id: cross_validation
+    seen: time_split
+    stage: Honest testing
+    title: "Cross-validation"
+    layout: figure
+    lines:
+      - "**Shuffled k-fold** puts test days next to training days that share their future."
+      - "**Walk-forward** trains on the past only. **Purged k-fold with an embargo** drops training rows that overlap the test, plus a gap after it."
+    visual:
+      kind: result
+      id: "B5"
+      file: "B5_cv_schemes.png"
+      caption: "Three ways to cut the same years into folds"
+    reading: 'Stone (1974), Cross-Validatory Choice and Assessment of Statistical Predictions, J. Royal Statistical Society B 36(2), 111-147; López de Prado (2018), Advances in Financial Machine Learning, ch. 7'
+    reading_full:
+      - 'Stone, M. (1974). "Cross-Validatory Choice and Assessment of Statistical Predictions." Journal of the Royal Statistical Society: Series B, 36(2), 111-147.'
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 7 "Cross-Validation in Finance".'
+    minutes: [4, 6]
+    notes: >-
+      One validation set gives one noisy score. Cross-validation, formalised by Stone in 1974, reuses the data: cut it into k pieces called folds, train on all but one, test on the one left out, repeat until every fold has been the test once, and average the scores.
+      The top row of the picture is the textbook version, with the rows shuffled first. That is fine when every row is independent, but in finance a test day sits right next to training days whose five-day labels overlap its own, so the model has effectively seen part of the answer. That is the random split from Part 1, which looked five times better on R squared, plus 0.56 percent against plus 0.11 percent, and nearly twice as good on the daily IC, 0.0201 against 0.0123, for exactly this reason.
+      The middle row is walk-forward: the training window always ends before the test block begins, and grows as we move through time.
+      The bottom row is López de Prado's purged k-fold. Purging removes training rows whose label period overlaps the test fold, and the embargo removes a few more rows just after the test fold, because information can leak forwards too. This lets every year take a turn as the test while keeping the test honest.
+      Part 2 builds purged cross-validation in code.
+
+
+  - id: test_once
+    seen: trying_many
+    stage: Honest testing
+    title: "The test set is spent once"
+    layout: side
+    size: 18
+    define:
+      - ["Data snooping", "reusing the same data to choose among many ideas, so the winner looks better than it is."]
+    lines:
+      - "Every look at the test set, followed by a change, leaks a little of it into your choices."
+      - "White's reality check asks whether the best of everything you tried beats the benchmark, accounting for every strategy you tried, not only the winner."
+      - "Keep a final hold-out, open it once, and report how many things you tried."
+    visual:
+      kind: cards
+      cards:
+        - ["Look", "check the test score"]
+        - ["Tweak", "change a setting because of what you saw"]
+        - ["Repeat", "after enough loops, the test set has become a training set"]
+    reading: 'White (2000), A Reality Check for Data Snooping, Econometrica 68(5), 1097-1126'
+    reading_full:
+      - 'White, H. (2000). "A Reality Check for Data Snooping." Econometrica, 68(5), 1097-1126.'
+    minutes: [6, 7]
+    notes: >-
+      A test set works like an exam paper: it measures you fairly only if you have not seen it.
+      Data snooping is reusing the same data again and again to choose among ideas; each idea may be tested honestly, but the winner of the contest is flattered by luck.
+      White's reality check is a statistical test built for this: instead of asking whether your final strategy beats a benchmark, it asks whether the best of all the strategies you tried does, which is a much harder bar.
+      This is slide {slide:trying_many} from Part 1 again, where about seven useless strategies were enough to expect one with a Sharpe ratio near one by luck.
+      The practical rule: keep a final period of data locked away, open it once at the very end, and write down how many things you tried before that.
+
+  - id: bias_variance
+    seen: tree
+    stage: Trade-offs
+    title: "Bias and variance"
+    layout: side
+    define:
+      - ["Bias", "error from a model too simple for the real pattern: wrong on average."]
+      - ["Variance", "error from a model so flexible that it changes with every new training sample."]
+    lines:
+      - "**Expected test error = bias² + variance + noise.**"
+      - "Noise is the part no model can remove. We can only trade bias against variance."
+    visual:
+      kind: result
+      id: "B2"
+      file: "B2_dartboard.png"
+      caption: "Low or high bias, low or high variance (illustration)"
+    reading: 'Geman, Bienenstock, Doursat (1992), Neural Networks and the Bias/Variance Dilemma, Neural Computation 4(1), 1-58; Hastie et al. (2009), ESL, ch. 7'
+    reading_full:
+      - 'Geman, S., Bienenstock, E. and Doursat, R. (1992). "Neural Networks and the Bias/Variance Dilemma." Neural Computation, 4(1), 1-58.'
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+    minutes: [7, 9]
+    notes: >-
+      Imagine training the same kind of model many times, each time on a fresh sample of training data, and throwing darts at a target with each fitted model. That is what the four dartboards show.
+      Bias is how far the centre of the darts is from the bullseye: the model is wrong on average, usually because it is too simple, like a straight line fitted to a curve.
+      Variance is how scattered the darts are: the model changes a lot depending on which training sample it happened to get, usually because it is very flexible, like a deep decision tree.
+      For squared error there is an exact identity, made famous for machine learning by Geman, Bienenstock and Doursat: the expected test error equals the bias squared, plus the variance, plus the noise. Squared means multiplied by itself.
+      Noise is the randomness in the outcome itself, which no model can predict. So the only choice we have is how to trade bias against variance: simpler models have more bias and less variance, flexible models the other way round.
+      Part 1's single tree on slide {slide:tree} is the high variance case, and the forest that averages many trees is the standard way to cut variance.
+
+  - id: fit_three
+    seen: overfit
+    stage: Trade-offs
+    title: "Underfit, good fit, overfit"
+    layout: side
+    lines:
+      - "**Underfit:** too simple, high bias. Poor on the training points and on new ones."
+      - "**Good fit:** follows the shape, ignores most of the noise."
+      - "**Overfit:** follows the noise, high variance. Good on train, poor on test."
+    visual:
+      kind: result
+      id: "B1"
+      file: "B1_fit_three.png"
+      caption: "Three polynomials of rising flexibility on 30 noisy points (synthetic)"
+    reading: 'James, Witten, Hastie, Tibshirani (2021), An Introduction to Statistical Learning, 2nd ed., Springer, ch. 2, Statistical Learning'
+    reading_full:
+      - 'James, G., Witten, D., Hastie, T. and Tibshirani, R. (2021). An Introduction to Statistical Learning (2nd ed.). Springer. Chapter 2 "Statistical Learning".'
+    minutes: [9, 10]
+    notes: >-
+      Here is the trade-off on a toy problem we generated ourselves: 30 points from a smooth wave, plus random noise.
+      We fit three polynomials, curves whose flexibility is set by their degree, the highest power of x they use: degree 1 is a straight line, degree 4 can bend a few times, degree 15 can bend almost anywhere.
+      The straight line underfits: it misses the wave, so it is poor on the training points and on new points alike. Its measured mean squared error is 0.229 on the training points and 0.311 on fresh points; the noise alone accounts for 0.09, the floor no curve can get below.
+      Degree 4 fits the shape and ignores most of the noise: training error 0.063, test error 0.101, close to that floor.
+      Degree 15 overfits: it chases individual noisy points, so its training error falls to 0.025 while its test error explodes to about 2,935, because between and beyond the training points the curve swings wildly.
+      Every number on the panels was measured, by fitting on the 30 points and testing on 2,000 fresh points from the same wave; this is the pattern Part 1's noise experiment showed on real data.
+
+  - id: u_theory
+    stage: Trade-offs
+    title: "The U-curve, in theory"
+    layout: figure
+    lines:
+      - "As flexibility grows, bias falls and variance rises, so test error is **lowest in the middle**."
+    visual:
+      kind: result
+      id: "B4"
+      file: "B4_ucurve_textbook.png"
+      caption: "Textbook, by simulation: bias², variance, noise and test error vs polynomial degree"
+    reading: 'Hastie et al. (2009), The Elements of Statistical Learning, ch. 7, Model Assessment and Selection'
+    reading_full:
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+    minutes: [10, 11]
+    notes: >-
+      This is the textbook U-curve, and it is computed, not sketched: we simulated many training sets, fitted polynomials of degree 1 to 12 to each, and measured the bias squared, the variance and the test error at every degree.
+      Bias falls and variance rises as the degree grows, so the test error, their sum plus the noise, falls and then rises, with its lowest point in the middle, at degree 3.
+      Bias plus variance plus noise matched the directly measured test error at every degree, which is the check that the decomposition holds.
+      The next slide runs the same idea on our own stocks.
+
+  - id: u_ours
+    seen: tree
+    stage: Trade-offs
+    title: "Our data has no U"
+    layout: figure
+    lines:
+      - "The best single tree is depth 1, and no depth beats a constant forecast: the noise floor at work."
+    visual:
+      kind: result
+      id: "B3"
+      file: "B3_depth_ours.png"
+      caption: "Our stocks, real data: one decision tree, train and test R² vs depth"
+    reading: 'Hastie et al. (2009), The Elements of Statistical Learning, ch. 7, Model Assessment and Selection'
+    reading_full:
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer. Chapter 7 "Model Assessment and Selection".'
+    minutes: [11, 12]
+    notes: >-
+      This is the same experiment on our real data, using Part 1's training years, test years and ranked features: a single decision tree at every depth from 1 to 20, scored by R squared against predicting zero, as in Part 1.
+      There is no U. The best test score is at depth 1, a single yes or no question, with a test R squared of plus 0.55 percent, and it falls at every extra level: about zero by depth 4, minus 16 percent at depth 10 and minus 161 percent at depth 20. Meanwhile the training R squared climbs to about 63 percent at depth 20. And no depth beats the constant forecast, the training average, at plus 0.73 percent.
+      So the textbook minimum in the middle has moved all the way to the simplest model. That is not a failed experiment; it is the finance lesson. The noise floor is so high that any extra flexibility is spent fitting noise, which is the next slide.
+
+
+  - id: noise_floor
+    seen: tiny_edge
+    stage: Trade-offs
+    title: "The noise floor"
+    layout: side
+    lines:
+      - "In finance almost all of the error looks like noise that no model can remove."
+      - "So bias is not the main enemy. **Variance is:** a flexible model spends its freedom fitting noise."
+      - "Strong ML models on individual stock returns score an out-of-sample R² **under 1%**."
+    visual:
+      kind: stat
+      big: "99.9%"
+      big_size: 110
+      label: "of the zero forecast's test error is still there after Part 1's forest (R² vs zero +0.09%)"
+      label_size: 20
+    reading: 'Gu, Kelly, Xiu (2020), Empirical Asset Pricing via Machine Learning, Review of Financial Studies 33(5), 2223-2273'
+    reading_full:
+      - 'Gu, S., Kelly, B. and Xiu, D. (2020). "Empirical Asset Pricing via Machine Learning." The Review of Financial Studies, 33(5), 2223-2273.'
+    minutes: [12, 13]
+    notes: >-
+      Remember the decomposition: test error is bias squared plus variance plus noise.
+      In Part 1 the reference forest scored an R squared of plus 0.09 percent against predicting zero on the test years, which means its squared error was 99.91 percent of the zero forecast's. Almost all of the error was still there.
+      We cannot split that leftover error into bias and noise exactly, but the research says most of it is noise: Gu, Kelly and Xiu found that even strong machine learning models explain under one percent of individual stock returns out of sample.
+      When noise is the floor, there is little bias left to remove, so the extra flexibility of a complex model has almost nothing real to fit and fits the noise instead. That is why, in finance, controlling variance matters most, and why the next slide, regularisation, is the most useful tool in this section.
+
+  - id: regularisation
+    seen: forest
+    stage: Trade-offs
+    title: "Regularisation"
+    layout: side
+    size: 16
+    define:
+      - ["Regularisation", "any brake that stops a model fitting the noise: a little bias, traded for a lot less variance."]
+    lines:
+      - "**Ridge** shrinks every coefficient towards zero. **Lasso** sets many exactly to zero."
+      - "**Trees:** limit the depth, require a minimum number of rows per leaf."
+      - "**Boosting, neural nets:** stop early, when the validation error stops falling."
+      - "**Averaging:** a forest averages many noisy trees, as in Part 1."
+    visual:
+      kind: result
+      id: "B6"
+      file: "B6_regularisation.png"
+      caption: "Ridge and lasso paths as the penalty grows (synthetic, 3 real signals of 20)"
+    reading: 'Hoerl, Kennard (1970), Ridge Regression, Technometrics 12(1), 55-67; Tibshirani (1996), J. Royal Statistical Society B 58(1), 267-288'
+    reading_full:
+      - 'Hoerl, A. E. and Kennard, R. W. (1970). "Ridge Regression: Biased Estimation for Nonorthogonal Problems." Technometrics, 12(1), 55-67.'
+      - 'Tibshirani, R. (1996). "Regression Shrinkage and Selection via the Lasso." Journal of the Royal Statistical Society: Series B, 58(1), 267-288.'
+    minutes: [13, 14]
+    notes: >-
+      Regularisation is any brake on a model's flexibility. It deliberately adds a little bias in exchange for a large cut in variance, which is the right trade when noise dominates.
+      For a linear model, a coefficient is the weight on one feature. Ridge regression, from Hoerl and Kennard, adds a penalty for large coefficients, so they all shrink towards zero as the penalty grows. The lasso, from Tibshirani, uses a slightly different penalty that pushes many coefficients to exactly zero, so it also chooses features.
+      The chart is a toy problem we generated: 20 features, of which only 3 truly matter. As the penalty grows, ridge shrinks all twenty smoothly, while the lasso drops the useless ones to zero; in the measured run, at a penalty of 1.53 the lasso keeps exactly three coefficients, and they are the three true signals, while ridge sets none of the twenty exactly to zero at any penalty.
+      Trees have their own brakes: a maximum depth, and a minimum number of training rows in each leaf. Part 1's reference forest used depth 6 and at least 50 rows per leaf, and the noise experiment showed what happens with the brakes off.
+      Boosted trees and neural networks are trained step by step, so the standard brake is early stopping: watch the validation error and stop when it stops improving. And averaging, as a forest does, cancels much of the variance of its individual trees.
+
+  - id: double_descent
+    optional: true
+    stage: Trade-offs
+    title: "Double descent"
+    layout: side
+    lines:
+      - "Past the point where a model can fit every training row exactly, test error can fall again."
+      - "The peak sits at that threshold, where the model has just enough freedom to fit every point, noise included."
+      - "A refinement of the U-curve, not a promise that bigger is better: here the largest models still lose to the best small one."
+    visual:
+      kind: result
+      id: "B8"
+      file: "B8_double_descent.png"
+      caption: "Test error vs number of random features (synthetic, minimum-norm fit)"
+    reading: 'Belkin, Hsu, Ma, Mandal (2019), Reconciling modern machine-learning practice and the classical bias-variance trade-off, PNAS 116(32), 15849-15854'
+    reading_full:
+      - 'Belkin, M., Hsu, D., Ma, S. and Mandal, S. (2019). "Reconciling modern machine-learning practice and the classical bias-variance trade-off." Proceedings of the National Academy of Sciences, 116(32), 15849-15854.'
+    minutes: [14, 15]
+    notes: >-
+      This is a modern twist on the U-curve, and it offers one explanation of why very large networks can still generalise.
+      We fitted a linear model on randomly generated features of the input, on a toy problem with 100 training points, and varied the number of features from a handful to 2,000.
+      With few features we see the usual U. As the number of features approaches the number of training points, written p equals n, the model can just fit every point exactly, noise included, and the test error spikes.
+      Past that threshold there are many ways to fit the points exactly, and the method we used picks the smallest, smoothest one, called the minimum-norm solution. Test error then falls again: the second descent that Belkin, Hsu, Ma and Mandal described.
+      Two cautions. The peak is real: at 100 features, exactly the number of points, the median test error was about 147, against 0.47 for the best small model with 20 features. And the second descent does not win here: the best of the very large models, at 1,400 features, reached about 0.85, still worse than the best small one. So say that error can fall again past the interpolation point, never that bigger models simply generalise better, and never skip validation because of it.
+
+  - id: family_map
+    seen: forest
+    stage: Model families
+    title: "The family map"
+    layout: full
+    size: 17
+    visual:
+      kind: tiles
+      cols: 4
+      even: false
+      gap: 0.18
+      mark_label: "used in Part 1"
+      cards:
+        - {head: "Linear and GLMs", body: "A weighted sum of the features; GLMs add a link, as in logistic regression", foot: "parametric", mark: true}
+        - {head: "k-nearest neighbours", body: "Average the outcomes of the k most similar past examples", foot: "non-parametric"}
+        - {head: "Decision trees", body: "Yes or no questions about the features, a value in each leaf", foot: "non-parametric"}
+        - {head: "Random forests", body: "Many trees on resampled data, averaged (bagging)", foot: "non-parametric", mark: true}
+        - {head: "Boosting", body: "Small trees added one at a time, each correcting the errors so far", foot: "non-parametric"}
+        - {head: "Kernels, SVMs", body: "Compare examples by a similarity function, then fit a simple boundary", foot: "non-parametric"}
+        - {head: "Neural networks", body: "Layers of weighted sums with simple bends between them", foot: "parametric, very many parameters"}
+        - {head: "Parametric or not?", body: "Parametric: a fixed number of parameters. Non-parametric: grows with the data", foot: "a rough guide, not a law"}
+    lines:
+      - "**Marked:** the two families Part 1 compared, the linear model and the random forest."
+    reading: 'James, Witten, Hastie, Tibshirani (2021), An Introduction to Statistical Learning, 2nd ed., Springer, ch. 2, Statistical Learning'
+    reading_full:
+      - 'James, G., Witten, D., Hastie, T. and Tibshirani, R. (2021). An Introduction to Statistical Learning (2nd ed.). Springer. Chapter 2 "Statistical Learning".'
+    minutes: [15, 16]
+    notes: >-
+      Here are the seven families of models you will meet most often, each in one line.
+      A linear model forecasts with a weighted sum of the features; a generalised linear model, a GLM, passes that sum through a link function, for example logistic regression, which turns it into a probability.
+      k-nearest neighbours finds the k past examples most similar to today and averages what happened next.
+      A decision tree asks yes or no questions, as in Part 1. Bagging fits many trees on resampled copies of the data and averages them; a random forest also gives each tree a random subset of the features. Boosting adds small trees one at a time, each one fitted to the errors left by the ones before.
+      Kernel methods, including support vector machines, compare examples through a similarity function and then fit a simple boundary in that space. Neural networks stack layers of weighted sums with simple bends between them.
+      The last card is a useful distinction from James and colleagues: a parametric model has a fixed number of parameters whatever the size of the data, while a non-parametric model can grow more detailed as data arrives. Part 1 compared the two marked families.
+
+  - id: properties
+    stage: Model families
+    title: "Model properties"
+    layout: full
+    size: 16
+    visual:
+      kind: grid
+      size: 13
+      header_size: 12
+      widths: [0.19, 0.11, 0.12, 0.10, 0.12, 0.12, 0.12, 0.12]
+      pad_x: 0.1
+      pad_y: 0.055
+      header: ["Family", "Flexibility", "Interpretability", "Data needed", "Captures interactions", "Extrapolates", "Needs feature scaling", "Training cost"]
+      rows:
+        - ["Linear and GLMs", "low", "high", "little", "only if added", "yes, linearly", "with penalties", "low"]
+        - ["k-nearest neighbours", "high", "medium", "lots", "yes", "no", "yes", "slow to predict"]
+        - ["Decision trees", "medium", "high if shallow", "medium", "yes", "no, flat", "no", "low"]
+        - ["Random forests", "high", "low", "medium", "yes", "no", "no", "medium"]
+        - ["Boosting", "high", "low", "medium", "yes", "no", "no", "high"]
+        - ["Kernels, SVMs", "high", "low", "medium", "yes", "depends", "yes", "high"]
+        - ["Neural networks", "very high", "low", "lots", "yes", "unreliably", "yes", "high"]
+    lines:
+      - "Qualitative ratings, not measurements: a rough guide from experience and the textbooks. Your data can overturn any cell."
+    reading: 'James et al. (2021), An Introduction to Statistical Learning, 2nd ed., ch. 2; Hastie et al. (2009), The Elements of Statistical Learning, 2nd ed.'
+    reading_full:
+      - 'James, G., Witten, D., Hastie, T. and Tibshirani, R. (2021). An Introduction to Statistical Learning (2nd ed.). Springer. Chapter 2 "Statistical Learning".'
+      - 'Hastie, T., Tibshirani, R. and Friedman, J. (2009). The Elements of Statistical Learning (2nd ed.). Springer.'
+    minutes: [16, 17]
+    notes: >-
+      This table is a rough guide, not a measurement: every cell is a judgement, and a particular dataset can overturn any of them.
+      Flexibility is how many different shapes a model can fit. Interpretability is how easily a person can see why it made a forecast.
+      Data needed is how many examples it takes before the model is reliable. Captures interactions asks whether it can learn that two features matter together, for example momentum only working when volatility is low, without being told.
+      Extrapolates asks what happens outside the range of the training data: a linear model carries its straight line onwards, while a tree just repeats the value of its last leaf.
+      Needs feature scaling asks whether the features must first be put on the same scale; trees do not care, because they only compare values, while distances and penalties do. Training cost is how much computing it takes.
+      For noisy financial data, the columns that matter most are flexibility and data needed: the more flexible the model, the more data it needs before its variance is under control.
+
+  - id: flex_interp
+    stage: Model families
+    title: "Interpretability vs flexibility"
+    layout: side
+    lines:
+      - "More flexible models can fit more shapes, and are harder to explain."
+      - "In finance, flexibility buys less than usual, because most of the extra shapes are noise."
+      - "So start simple, and add flexibility only when the validation score earns it."
+    visual:
+      kind: result
+      id: "B7"
+      file: "B7_flex_interp.png"
+      caption: "Qualitative, after James et al. (2021) fig. 2.7, with some families added by us"
+    reading: 'James, Witten, Hastie, Tibshirani (2021), An Introduction to Statistical Learning, 2nd ed., Springer, ch. 2, fig. 2.7'
+    reading_full:
+      - 'James, G., Witten, D., Hastie, T. and Tibshirani, R. (2021). An Introduction to Statistical Learning (2nd ed.). Springer. Chapter 2 "Statistical Learning", figure 2.7.'
+    minutes: [17, 18]
+    notes: >-
+      This picture places the families on two axes: across, how flexible a model is; up, how easy it is to interpret.
+      It follows a figure in James and colleagues' textbook, which places subset selection, the lasso, least squares, generalised additive models, trees, bagging and boosting, support vector machines and deep learning; we added ridge, k-nearest neighbours and random forests ourselves, and the chart marks those; ridge sits level with least squares, slightly to its right. Like the last slide, the positions are qualitative judgements, not measurements.
+      A generalised additive model, a GAM, is a sum of separate smooth curves, one per feature: more flexible than a straight line, still readable.
+      The general rule is that flexibility costs interpretability. In finance it also buys less than usual, because the extra shapes a flexible model can fit are mostly noise.
+      So a sensible order of work is: a simple, readable model first, then more flexibility only if a fair validation test shows it helps.
+
+  - id: explaining
+    optional: true
+    stage: Model families
+    title: "Explaining a model"
+    layout: side
+    lines:
+      - "Ask what a model relies on before you trust it."
+      - "Importance measured on training data shows what was fitted; on test data, what lasted."
+    visual:
+      kind: tiles
+      cols: 2
+      body_size: 14
+      cards:
+        - {head: "Coefficients", body: "Linear models: each weight is the effect of one feature, holding the others fixed"}
+        - {head: "Impurity vs permutation", body: "Impurity: how much a feature's splits helped in training. Permutation: shuffle it on test data and measure the damage"}
+        - {head: "SHAP values", body: "Split each single forecast into a contribution from every feature"}
+        - {head: "Interpretable by design", body: "For high-stakes decisions, prefer a model simple enough to read directly"}
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, ch. 8, Feature Importance; Lundberg, Lee (2017), NeurIPS 30; Rudin (2019), Nature Machine Intelligence 1(5), 206-215'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 8 "Feature Importance".'
+      - 'Lundberg, S. M. and Lee, S.-I. (2017). "A Unified Approach to Interpreting Model Predictions." Advances in Neural Information Processing Systems 30.'
+      - 'Rudin, C. (2019). "Stop explaining black box machine learning models for high stakes decisions and use interpretable models instead." Nature Machine Intelligence, 1(5), 206-215.'
+    minutes: [18, 19]
+    notes: >-
+      Before trusting a model, ask what it relies on. There are four common ways to look.
+      In a linear model, each coefficient is the change in the forecast for a one-unit change in that feature, holding the others fixed.
+      For trees there are two kinds of feature importance, discussed in López de Prado's chapter 8. Impurity importance adds up how much each feature's splits improved the fit during training; it is fast, but it measures what was fitted, noise included. Permutation importance shuffles one feature on test data, breaking its link with the outcome, and measures how much worse the forecasts get; it measures what lasted.
+      When we measured permutation importance on the workshop's reference forest with raw features, only ret_5, the one-week reversal feature, helped on the test years by more than one standard deviation; shuffling most of the others made the test error slightly smaller.
+      SHAP values, from Lundberg and Lee, split each single forecast into a contribution from every feature, so you can explain one decision at a time.
+      Rudin argues that for high-stakes decisions it is better to use a model that is interpretable by design than to explain a black box after the fact. Part 2 covers feature importance in code.
+
+  - id: no_free_lunch
+    seen: baseline
+    stage: Model families
+    title: "No free lunch"
+    layout: side
+    lines:
+      - "Averaged over every possible problem, no learning algorithm beats any other on data it has not seen."
+      - "So a model wins only by matching the structure of a particular problem."
+      - "Practical rule: give a simple baseline a fair chance first, and let honest validation pick."
+    visual:
+      kind: cards
+      cards:
+        - ["Assumptions are the price", "every model wins only where its built-in assumptions fit the problem"]
+        - ["Part 1's evidence", "a constant forecast beat both the linear model and the forest on R² vs zero"]
+        - ["So", "start simple, compare honestly, keep what validation supports"]
+    reading: 'Wolpert (1996), The Lack of A Priori Distinctions Between Learning Algorithms, Neural Computation 8(7), 1341-1390'
+    reading_full:
+      - 'Wolpert, D. H. (1996). "The Lack of A Priori Distinctions Between Learning Algorithms." Neural Computation, 8(7), 1341-1390.'
+    minutes: [19, 20]
+    notes: >-
+      Wolpert proved a sobering result, nicknamed the no free lunch theorem: averaged over every possible problem, no learning algorithm does better than any other on examples it has not seen.
+      It does not mean all models are equally good on your problem. It means that whenever a model wins, it wins because its built-in assumptions happen to match the structure of that problem, for example a forest assuming that the answer depends on yes or no questions about the features.
+      So there is no best model in general, only a best model for a given kind of data, and the only way to find it is an honest comparison.
+      Part 1 is a small example: on R squared against predicting zero, the constant forecast scored plus 0.73 percent, the linear model plus 0.45 percent and the forest plus 0.09 percent, so the simplest forecast won on that score.
+      That is why every model in Part 1 was compared with a baseline first.
+
+  - id: finance_rules
+    seen: textbook_vs_finance
+    stage: Finance
+    title: "Finance changes the rules"
+    layout: figure
+    lines:
+      - "**Overlapping labels:** 1,000 daily 5-day labels hold far fewer independent observations."
+      - "**Match the metric to the decision:** Part 1's forest lost to a constant on R² (+0.09% vs +0.73%), yet its daily IC was slightly positive (+0.011)."
+    visual:
+      kind: result
+      id: "B9"
+      file: "B9_overlap.png"
+      caption: "Overlapping 5-day labels: how many are really independent"
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, ch. 4, Sample Weights; Bellman (1961), Adaptive Control Processes'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 4 "Sample Weights".'
+      - 'Bellman, R. (1961). Adaptive Control Processes: A Guided Tour. Princeton University Press.'
+      - 'Part 1 numbers: docs/core-results.md, "Numbers the notebook prints", section 4 (reference forest, test 2015-01-12 to 2019-12-20).'
+    minutes: [20, 22]
+    notes: >-
+      Everything in this section holds in finance, but the table from slide {slide:textbook_vs_finance} changes how it applies. Three changes matter most.
+      First, effective sample size: the number of truly independent observations. Our labels are five-day returns, so the label for Monday and the label for Tuesday share four of their five days. López de Prado measures this with average uniqueness: for each label, the average over its days of 1 divided by the number of labels covering that day; it is about 0.2 for 5-day labels. Computed for 1,000 five-day labels on a plain daily calendar it is 0.201, so 1,000 daily labels carry about the information of 201 independent ones, as the chart shows.
+      Second, the curse of dimensionality, Bellman's phrase: every feature you add spreads the same data more thinly, so with few independent observations, many features make overfitting easier.
+      Third, the metric must match the decision. In Part 1 the forest lost to a constant forecast on R squared, plus 0.09 percent against plus 0.73 percent, because the constant knew that shares rose on average. But a long/short book does not care about the average; it only cares which stocks beat the others on the same day. That is measured by the information coefficient, IC: the correlation between the forecasts and the outcomes across the stocks on one day. There the forest's mean daily IC was plus 0.011, above zero on 52.5 percent of days. That is small, and with overlapping labels it is not proof of skill, but it shows that the same forecasts can lose on one score and edge ahead on another. Choose the score that matches the trade you will make.
+
+
+  - id: two_cultures
+    optional: true
+    stage: Finance
+    title: "Two cultures"
+    layout: side
+    lines:
+      - "**Data modelling:** assume a simple model of how the data were made, then estimate its parameters."
+      - "**Algorithmic modelling:** treat the process as unknown, and judge any method by how well it predicts."
+      - "Our view: finance needs both. Prediction picks the trades; a reason why it works says when to stop trusting it."
+    visual:
+      kind: cards
+      cards:
+        - ["Data modelling", "linear regression, factor models: readable, but wrong if the assumed form is wrong"]
+        - ["Algorithmic modelling", "forests, boosting, neural nets: flexible, judged only by accuracy on new data"]
+    reading: 'Breiman (2001), Statistical Modeling: The Two Cultures, Statistical Science 16(3), 199-231'
+    reading_full:
+      - 'Breiman, L. (2001). "Statistical Modeling: The Two Cultures." Statistical Science, 16(3), 199-231.'
+    minutes: [22, 23]
+    notes: >-
+      Leo Breiman, who invented the random forest, wrote a famous essay about two ways of doing statistics.
+      The data modelling culture assumes a simple model of how the data were produced, for example a straight line plus noise, estimates its parameters, and reads conclusions from them. Factor models in finance, which explain returns with a few common drivers, belong here.
+      The algorithmic modelling culture treats the process as unknown and judges any method, a forest or a neural network, purely by how well it predicts new data. Breiman argued that statisticians relied too much on the first.
+      Our own view, not Breiman's: finance needs both. Prediction picks the trades, but an economic reason why a signal works is what tells you when the regime has changed and the signal should no longer be trusted.
+
+  - id: checklist
+    stage: Finance
+    stage_tail: "checklist"
+    title: "The checklist"
+    layout: full
+    visual:
+      kind: grid
+      size: 19
+      header_size: 17
+      widths: [0.2, 0.8]
+      pad_y: 0.16
+      header: ["Chapter", "Ask yourself"]
+      rows:
+        - ["Generalisation", "Is this number from data the model never saw?"]
+        - ["Honest testing", "Did I fit, choose and judge on separate data, in time order, with a gap?"]
+        - ["Trade-offs", "Is the model's freedom earned, or is it fitting noise?"]
+        - ["Model families", "Did a simple baseline get a fair chance first?"]
+        - ["Finance", "Do my labels overlap, and does my score match the trade I will make?"]
+    minutes: [23, 24]
+    notes: >-
+      If you remember one slide from the bonus section, make it this one: one question per chapter.
+      Generalisation: is the number I am looking at from data the model never saw?
+      Honest testing: did I fit, choose and judge on three separate sets, in time order, with gaps?
+      Trade-offs: has the model's flexibility been earned on validation data, or is it fitting noise?
+      Model families: did a simple baseline, even predicting zero or a constant, get a fair chance first?
+      Finance: do my labels overlap, so that I have fewer independent observations than rows, and does my score match the decision I will actually make?
+
+  - id: bonus_qr
+    stage: Finance
+    stage_tail: "follow us"
+    title: "Thank you, and follow QuantSoc"
+    layout: side
+    lines:
+      - "**Part 2 next week:** purged cross-validation, triple-barrier labels, feature importance, deflated Sharpe."
+      - "Part 1 is in the notebook you take home. The bonus section needs no notebook: these slides are all of it."
+      - "**Nothing here is investment advice.**"
+    visual:
+      kind: qr
+    minutes: [24, 25]
+    notes: >-
+      That is the end of the bonus section.
+      Part 2 next week puts several of these ideas into code: purged cross-validation, triple-barrier labels, which decide a trade's outcome by whichever of a profit target, a loss limit or a time limit is hit first, feature importance, and the deflated Sharpe ratio, which corrects a Sharpe ratio for the number of things you tried.
+      Nothing in this workshop is investment advice. Scan the codes to follow QuantSoc, and thank you.

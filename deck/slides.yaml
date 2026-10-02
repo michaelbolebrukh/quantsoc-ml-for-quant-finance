@@ -1,0 +1,632 @@
+# Content for Part 1 of the Workshop 2 deck (the bonus section is slides_bonus.yaml, appended after the last
+# slide here). Layout code lives in build_deck.py; edit words here.
+# Markup: **bold** inside a line. "define" entries become definition cards.
+# id: a stable name for every slide. Slide numbers are computed from position; "{slide:<id>}" anywhere renders as
+#   that slide's live number, so inserting a slide never breaks a cross-reference. The self-check maps are keyed
+#   by id (build_deck.py: EXPECTED_RUNS, EXPECTED_STAGES, MAIN_COUNT, MAIN_MINUTES).
+# visual kinds: image (D_ figure we draw), result (F1..F6, placeholder until its PNG exists), stack, pair,
+#   pipeline, cards, tiles (dict cards with head/body/foot/mark), table (the data card), grid (a general table),
+#   sets, stat, chart_prices, chart_scatter, chart_trials, portfolio, qr
+# layouts: title, side (text left, visual right), wide (visual on top), full (visual across, lines beneath)
+# finance: the row of the "Textbook ML vs finance ML" table this slide illustrates, drawn as a small
+#   "In finance" chip; the self-check requires it to name an existing row.
+# minutes: [start, end] within Part 1 (contiguous from 0 to MAIN_MINUTES). run: notebook section number.
+# stage: where the slide sits on the process map, drawn as a strip of the six steps above the title.
+#   none = no strip; ahead = strip with nothing lit; otherwise a step name from `process`, lit in brand blue.
+#   stage_tail adds one small lit chip after the last step.
+# reading / reading_full: the "Reference:" footer line and the full citation in the notes (key names kept).
+
+# The six steps of slide 2's map and of the strip on every content slide: [name, caption].
+process:
+  - ["Prices", "daily prices of 40 stocks"]
+  - ["Features", "clues computed only from the past"]
+  - ["Model", "a rule learned from past examples, giving a forecast per stock"]
+  - ["Check", "is the result real or luck?"]
+  - ["Portfolio", "which stocks to buy and which to sell"]
+  - ["Backtest", "a replay on years the model never saw"]
+
+sections:
+  0: "Setup"
+  1: "The data"
+  2: "Features, the target and the no-peeking rule"
+  3: "A baseline and a fair test"
+  4: "A real ML model"
+  5: "Overfitting, live"
+  6: "From forecasts to a portfolio"
+  7: "Your strategy's backtest"
+  8: "Export and paper trading"
+
+slides:
+  - id: title
+    stage: none
+    layout: title
+    title: "Machine Learning for Quantitative Finance"
+    subtitle: "Part 1 · A QuantSoc workshop · about 70 minutes"
+    lines:
+      - "Open the workshop notebook in Colab now and run section 0, Setup. Link: quant-soc.com/links/workshop-2"
+    minutes: [0, 1]
+    notes: >-
+      Welcome everyone, this is Part 1 of Machine Learning for Quantitative Finance from the Quantitative Finance Society.
+      Please open the workshop notebook in Colab and run section 0, Setup, while I talk: the download takes a few seconds, the imports a few more.
+      You need no machine learning and no finance background, only a little Python.
+      Every term I use will be defined the first time it appears.
+    cue: "Ask the room to run notebook section 0, Setup, now. Wait for most hands to show it finished before slide {slide:data}."
+
+  - id: map
+    stage: none
+    title: "What we're building"
+    layout: wide
+    visual:
+      kind: pipeline      # steps: the top-level `process` list
+    lines:
+      - "Five short tasks. Each one sets one **knob** of your own strategy."
+      - "At the end, the backtest runs **your** choices, and you take the code home."
+    chips: ["momentum lookback", "extra feature", "train and test dates", "forest size and depth", "long/short counts and rebalance"]
+    minutes: [1, 3]
+    notes: >-
+      This is the whole journey on one slide: prices, then features, then a model that gives a forecast for each stock, then a check that the result is real and not luck, then a portfolio, then a backtest.
+      From the next slide on, the strip across the top of every slide shows where we are on this map, with the current step lit in blue.
+      A feature is just a clue we compute from past prices, and a model is a rule the computer learns from past examples.
+      You will do five tasks, and each one is copy and change: a worked example sits right above, and you change one to three numbers on its first line.
+      Each task sets one knob of your strategy, so the final result is genuinely yours.
+
+  - id: textbook_vs_finance
+    stage: ahead
+    title: "Textbook ML vs finance ML"
+    layout: full
+    visual:
+      kind: grid
+      header: ["", "Textbook ML", "Finance ML"]
+      widths: [0.14, 0.34, 0.52]
+      highlight: 2
+      size: 15
+      header_size: 16
+      pad_y: 0.07
+      rows:
+        - ["Data", "Independent draws from one fixed process", "Time-ordered, regimes change, and failed firms drop out (survivorship)"]
+        - ["Signal", "Strong: a cat photo shows a cat", "Tiny next to the noise"]
+        - ["Validation", "Shuffled k-fold cross-validation", "Walk-forward or purged, with a gap"]
+        - ["Labels", "Independent of each other", "Overlapping in time"]
+        - ["Sample size", "Often huge", "Fewer independent observations than it looks"]
+        - ["Models", "Whatever wins benchmarks: often deep nets", "Regularised linear models, tree ensembles, small neural nets; deep learning mainly on raw order-book data"]
+        - ["Features", "Often raw inputs (pixels, words), learned end to end", "Engineered from prices, accounts and alternative data"]
+        - ["Success", "Accuracy or loss on held-out data", "Out-of-sample IC, then Sharpe after costs"]
+    reading: 'López de Prado (2018), The 10 Reasons Most Machine Learning Funds Fail, J. Portfolio Management 44(6), 120-133; Gu, Kelly, Xiu (2020), Empirical Asset Pricing via Machine Learning, RFS 33(5), 2223-2273'
+    reading_full:
+      - 'López de Prado, M. (2018). "The 10 Reasons Most Machine Learning Funds Fail." The Journal of Portfolio Management, 44(6), 120-133. https://doi.org/10.3905/jpm.2018.44.6.120 (free copy: SSRN 3104816)'
+      - 'Gu, S., Kelly, B. and Xiu, D. (2020). "Empirical Asset Pricing via Machine Learning." The Review of Financial Studies, 33(5), 2223-2273. (Models row: tables of stock characteristics.)'
+      - 'Sirignano, J. and Cont, R. (2019). "Universal features of price formation in financial markets: perspectives from deep learning." Quantitative Finance, 19(9), 1449-1459. (Models row: deep learning on order books.)'
+      - 'Ke, Z. T., Kelly, B. T. and Xiu, D. (2019). "Predicting Returns with Text Data." NBER Working Paper 26186. (Models row: text, with a screening and topic model.)'
+    minutes: [3, 6]
+    notes: >-
+      Machine learning, ML for short, means a computer learning a rule from examples instead of being told the rule.
+      Most courses teach it on textbook problems such as recognising cats in photos, and finance breaks almost every assumption those problems make, row by row.
+      Data: in a textbook each example is a fresh, independent draw from one process that never changes; market data arrives in time order, and the process itself changes, which is called a change of regime, for example calm years followed by a crisis. And companies that fail tend to drop out of the data, so what is left looks better than the past really was; that is survivorship bias, slide {slide:survivorship}.
+      Signal: a photo of a cat really does show a cat, but a stock's past gives only a tiny hint about its future, buried in random day to day noise.
+      Validation means testing a model fairly on data it did not learn from. Textbooks shuffle the rows and cut them into k groups, testing on each group in turn, which is called k-fold cross-validation; in finance we test only on later years, called walk-forward, or we remove the training rows that overlap the test, called purging, and leave a gap.
+      Labels are the answers we train on. Ours are five-day returns, so the labels of neighbouring days share four of their five days, and that overlap is why the sample size row says there are fewer independent observations than the row count suggests.
+      Models: regularised means a model is held back from fitting too closely, and a tree ensemble is many decision trees averaged, which we build later. On tables of stock characteristics, Gu, Kelly and Xiu found that trees and neural networks beat linear models, and that among neural networks a few hidden layers, best at three, beat deeper ones. Deep learning is used mainly on raw order-book data, the live list of orders waiting to buy and sell, as in Sirignano and Cont. Text models are often simple, as in Ke, Kelly and Xiu, who use a screening and topic model rather than a deep network.
+      Features are the inputs: textbook models often read raw inputs such as pixels or words and learn their own features end to end, while finance features are engineered by hand from prices, company accounts and other data.
+      Success: a textbook scores accuracy, or a loss, on held-out data. In finance the first question is whether the forecasts rank the stocks correctly on data the model never saw, measured by the information coefficient, IC, the correlation between forecasts and outcomes across stocks on one day; then a trader scores money made per unit of risk after paying for every trade, the Sharpe ratio after costs, which slide {slide:trying_many} defines.
+      López de Prado lists ten common mistakes in financial machine learning; today we meet two of them, leakage and backtest overfitting, and the noise in the signal row is why they bite.
+      From now on, a small blue tag at the top right of a slide, In finance, names the row of this table that the slide is about.
+
+  - id: data
+    stage: Prices
+    title: "The data"
+    layout: side
+    run: 1
+    lines:
+      - "40 large US companies, one price per trading day, 2000 to 2019."
+    define:
+      - ["Return", "how much the price moved: today's price divided by yesterday's, minus 1. Up 2% is a return of 0.02."]
+      - ["Adjusted close", "the closing price corrected for share splits and dividends, so returns are fair."]
+    visual:
+      kind: chart_prices
+      symbols: ["KO", "JPM", "XOM", "GE"]
+      caption: "Adjusted close, rescaled so each stock starts at 100 (real data, Yahoo snapshot)"
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, Wiley, ch. 2, Financial Data Structures'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 2 "Financial Data Structures"; Chapter 7 "Cross-Validation in Finance"; Chapter 11 "The Dangers of Backtesting". This slide: chapter 2.'
+    minutes: [6, 9]
+    notes: >-
+      Run notebook section 1 now: it loads the prices and draws a chart like this one.
+      Each line is one company's price over twenty years, rescaled so they all start at 100, so you can compare them.
+      We never model prices directly; we model returns, which is how much the price moved, as a fraction.
+      We use the adjusted close, which is corrected for splits and dividends, so a stock splitting in two does not look like a crash.
+    cue: "▶ Notebook: run section 1, The data."
+
+  - id: data_card
+    stage: Prices
+    title: "Where it came from"
+    layout: side
+    lines:
+      - "Every dataset deserves a label saying where it came from and what is wrong with it."
+      - "Real prices of real companies, but **not** a fair sample of the market."
+    visual:
+      kind: table
+      rows:
+        - ["Source", "Yahoo Finance, downloaded once with the yfinance package and saved, so nothing downloads live"]
+        - ["Universe", "40 US large caps (big companies by stock market value), from the S&P 100"]
+        - ["Period", "2000 to 2019, daily, {n_days} trading days, {n_rows} rows"]
+        - ["Columns", "date, symbol, open, high, low, close, adjusted close, volume"]
+        - ["Warning", "Survivorship-biased: we kept only companies that still trade today. Slide {slide:survivorship} explains why that matters."]
+      warn_row: 4
+    minutes: [9, 11]
+    notes: >-
+      This is the data card, the label on the tin.
+      The prices are a Yahoo Finance snapshot, downloaded once with the yfinance package and saved with the workshop, so nothing depends on a live download.
+      The universe is 40 large US companies, large caps, chosen from the S&P 100, daily from 2000 to 2019.
+      The red row matters: we only kept companies that still trade today, which is called survivorship bias, and it flatters every result you will see. We come back to it on slide {slide:survivorship}.
+
+  - id: target
+    finance: "Labels"
+    stage: Features
+    title: "Past vs future: the target"
+    layout: wide
+    run: 2
+    visual:
+      kind: image
+      file: "D_timeline.png"
+    define:
+      - ["Feature", "a number we know on day t, computed only from data up to and including day t."]
+      - ["Target", "what we want to predict: the return over the next 5 trading days."]
+    lines:
+      - "**The rule:** never read a date after day t."
+    minutes: [11, 14]
+    notes: >-
+      This is the single rule the whole workshop teaches.
+      On any day t, a feature may only use information up to and including day t: that is the past, in blue.
+      The target is the future we want to predict, the return over the next five trading days.
+      For simplicity we pretend we trade at the close of day t; a real system would trade at the next open.
+      Run section 2 now and do Tasks 1 and 2: each one builds a feature by copying the example and changing one number.
+      The In finance tag says Labels: our five-day targets on neighbouring days share four of their five days, so the labels overlap in time.
+    cue: "▶ Notebook: run section 2 (Tasks 1 and 2: momentum lookback and the extra feature)."
+
+  - id: feature_universe
+    finance: "Features"
+    stage: Features
+    title: "The feature universe"
+    layout: full
+    size: 15
+    visual:
+      kind: tiles
+      body_size: 12
+      pad: 0.13
+      cols: 4
+      even: false
+      gap: 0.18
+      mark_label: "partly in our notebook"
+      cards:
+        - {head: "Price and technical", body: "Momentum, short-term reversal, 52-week high", ours: "past returns, 52-week high", foot: "Data: daily prices", mark: true}
+        - {head: "Volatility and risk", body: "Realised volatility, beta, idiosyncratic volatility", ours: "21 and 63-day volatility", foot: "Data: daily prices", mark: true}
+        - {head: "Volume and liquidity", body: "Volume surprise, turnover, bid-ask spread, Amihud illiquidity", ours: "volume surprise", foot: "Data: daily volume, quotes", mark: true}
+        - {head: "Fundamentals", body: "Value: book-to-market, earnings yield. Quality: profitability. Asset growth", foot: "Data: company accounts"}
+        - {head: "Analysts and events", body: "Earnings surprise and post-earnings drift, forecast revisions, earnings dates", foot: "Data: analyst forecasts"}
+        - {head: "Alternative data", body: "News and filings text, web traffic, card spending, satellite images", foot: "Data: specialist vendors"}
+        - {head: "Order book", body: "Microstructure: order imbalance, queue depth", foot: "Data: exchange tick data"}
+        - {head: "Macro, cross-asset", body: "Interest rates, credit spreads, the VIX, currency moves", foot: "Data: market series"}
+    lines:
+      - "**Marked:** families our notebook draws on, because daily prices and volume are free. **Not exhaustive:** also options-implied measures, short interest, ownership and insider trades, seasonality, ESG."
+    reading: 'Green, Hand, Zhang (2017), RFS 30(12), 4389-4436; Hou, Xue, Zhang (2020), Replicating Anomalies, RFS 33(5), 2019-2133; Fama, French (1993), J. Financial Economics 33(1), 3-56; Bernard, Thomas (1989), J. Accounting Research 27 (Supplement), 1-36'
+    reading_full:
+      - 'Green, J., Hand, J. R. M. and Zhang, X. F. (2017). "The Characteristics that Provide Independent Information about Average U.S. Monthly Stock Returns." The Review of Financial Studies, 30(12), 4389-4436.'
+      - 'Hou, K., Xue, C. and Zhang, L. (2020). "Replicating Anomalies." The Review of Financial Studies, 33(5), 2019-2133.'
+      - 'Fama, E. F. and French, K. R. (1993). "Common risk factors in the returns on stocks and bonds." Journal of Financial Economics, 33(1), 3-56. (Value: book-to-market.)'
+      - 'Bernard, V. L. and Thomas, J. K. (1989). "Post-Earnings-Announcement Drift: Delayed Price Response or Risk Premium?" Journal of Accounting Research, 27 (Supplement), 1-36. (Post-earnings drift.)'
+    minutes: [14, 18]
+    notes: >-
+      A feature is any number we know on day t that might hint at what a stock does next, and researchers have proposed hundreds of them. Here they are in eight families, each with the data it needs.
+      Price and technical features come from the price alone: momentum, the recent trend; short-term reversal, recent winners slipping back; and how far the price sits below its highest point of the past year, the 52-week high.
+      Volatility and risk: realised volatility is how much the price actually swung; beta is how strongly a stock moves with the whole market; idiosyncratic volatility is the part of its swings the market does not explain.
+      Volume and liquidity: a volume surprise is trading far above or below the usual level; turnover is shares traded as a share of all shares; the bid-ask spread is the gap between the price you can buy at and the price you can sell at; Amihud illiquidity measures how far the price moves for each dollar traded.
+      Fundamentals come from company accounts. Value compares the accounting worth of a company with its market price, for example book-to-market, which Fama and French built into their famous risk factors; quality asks how profitable the company is and how much of its profit is real cash rather than accruals, which are accounting entries not yet paid in cash; investment asks how fast the company is growing its assets.
+      Analysts and events: an earnings surprise is reported profit minus what analysts expected, and Bernard and Thomas documented that prices keep drifting in the direction of the surprise after the announcement, called post-earnings-announcement drift; revisions are analysts changing their forecasts.
+      Alternative data is anything new and unusual: the text of news and company filings, website visits, card spending, even satellite pictures of car parks. The order book is the live list of orders waiting to buy and sell, and imbalance means more waiting on one side. Macro and cross-asset features describe the whole economy: interest rates, credit spreads, which are the extra interest risky companies pay, and the VIX, a measure of expected market volatility taken from option prices.
+      A warning about the universe: more features is not more signal. Green, Hand and Zhang tested 94 characteristics and found only 12 gave independent information among stocks that are not microcaps, the tiniest companies, from 1980 to 2014, and just two since 2003. Of 452 published anomalies, 65% fail the usual t of 1.96 once microcaps are down-weighted (Hou, Xue and Zhang 2020).
+      Our notebook draws on only the three marked families, and only on the members named on each card: past returns and the 52-week high, 21 and 63-day volatility, and the volume surprise. Beta, spreads, Amihud illiquidity and everything else on the slide are not in it, because they need data we do not have for free. The list is not exhaustive either: options-implied measures, short interest, who owns the shares and what insiders trade, calendar seasonality and ESG scores, ratings of environmental, social and governance behaviour, are all used too.
+
+  - id: literature
+    stage: Features
+    title: "Momentum and reversal, from the literature"
+    layout: side
+    lines:
+      - "**Momentum:** stocks that rose over the past 3 to 12 months tended to keep rising for a while."
+      - "**Reversal:** last month's winners tended to slip back the next month."
+      - "Both are price features: the first family on the last slide."
+    visual:
+      kind: cards
+      cards:
+        - ["Momentum scale", "ret_63, the past 3 months"]
+        - ["Reversal scale", "ret_1 and ret_5, the past day and week"]
+        - ["Your Task 1 lookback", "replaces the 21-day return: 63 to 252 days leans towards momentum, 21 or fewer towards reversal"]
+    reading: 'Jegadeesh & Titman (1993), Returns to Buying Winners and Selling Losers, J. Finance 48(1), 65-91; Jegadeesh (1990), Evidence of Predictable Behavior of Security Returns, J. Finance 45(3), 881-898'
+    reading_full:
+      - 'Jegadeesh, N. and Titman, S. (1993). "Returns to Buying Winners and Selling Losers: Implications for Stock Market Efficiency." The Journal of Finance, 48(1), 65-91.'
+      - 'Jegadeesh, N. (1990). "Evidence of Predictable Behavior of Security Returns." The Journal of Finance, 45(3), 881-898.'
+    minutes: [18, 21]
+    notes: >-
+      Two of the oldest features in the universe come from price alone, and they come from decades of research rather than from today.
+      Jegadeesh and Titman found that buying past winners and selling past losers paid off over three to twelve month horizons in historical US data: that is called momentum.
+      Jegadeesh found the opposite at the one month scale: last month's winners tended to fall back, which is called reversal.
+      In our notebook, ret_63, the return over the past 63 trading days or about three months, sits at the short end of the momentum range, while ret_1 and ret_5, the past day and week, are short-horizon returns at the scale where reversal would show. Your Task 1 lookback replaces the 21-day return in the feature list, so ret_21 is there only if you keep the lookback at 21: a lookback of 63 to 252 days leans towards momentum, 21 or fewer towards reversal.
+      Whether these effects survive in our 40 stocks and our years is exactly what the notebook tests; a published result is a reason to try a feature, not a promise.
+
+  - id: features_drawn
+    stage: Features
+    title: "Our eight features, drawn"
+    layout: figure
+    lines:
+      - "**Price:** returns over 1, 5, 21 and 63 days, and the distance below the 52-week high. **Volatility** over 21 and 63 days. **Volume** against its usual level."
+      - "All eight use only data up to and including day t."
+    visual:
+      kind: result
+      id: "F5"
+      file: "F5_features_one_stock.png"
+      caption: "The eight workshop features for JPMorgan Chase, 2008 to 2010 (real data)"
+    minutes: [21, 24]
+    notes: >-
+      This is what our eight features actually look like for one well-known stock, the bank JPMorgan Chase, over 2008 to 2010, which includes the financial crisis, one panel per feature.
+      The first four panels are past returns over 1, 5, 21 and 63 trading days: the short ones jump about from day to day, the long ones move slowly, because they average over more days.
+      Volatility over 21 and 63 days is how much the daily returns swung in that window; watch it climb from the autumn of 2008 into early 2009, when markets became violent.
+      Volume surprise is today's trading volume compared with its usual level over the past 63 days, measured in standard deviations, which are the typical size of a move away from the average.
+      The last panel is how far the price sits below its highest close of the past year: zero at a new high, and negative below it; in early 2009 it was about 68 percent below.
+      Every one of them is computed only from data up to and including day t, which is the rule from slide {slide:target}.
+
+  - id: features_usable
+    stage: Features
+    title: "Making features usable"
+    layout: side
+    size: 16
+    lines:
+      - "**Rank across stocks on each date** (what we do): the order is kept, the scale is gone."
+      - "**Z-score and winsorise:** subtract the day's average, divide by its spread, cap the extremes."
+      - "**Interactions:** combine two features, such as momentum times volatility."
+      - "**Fractional differencing:** make a price series stable but keep some memory."
+      - "**Point-in-time:** accounts get restated, and the revised number leaks the future (slide {slide:leakage})."
+    visual:
+      kind: result
+      id: "F6"
+      file: "F6_ranking.png"
+      caption: "10 October 2008, 40 stocks: raw 21-day return (left), its rank (right), real data"
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, Wiley, ch. 5, Fractionally Differentiated Features'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 5 "Fractionally Differentiated Features".'
+    minutes: [24, 27]
+    notes: >-
+      Raw features are awkward for a model: in a calm year every return is small, in a crisis every return is large, so the same raw number means different things in different years.
+      What our notebook does is rank: on each date, each feature is replaced by its position among the 40 stocks, scaled so the middle stock is zero. The chart shows one date, 10 October 2008, in the week of the crash: on the left, the raw 21-day return, where 39 of the 40 stocks were down and the average was minus 24.9 percent; on the right, the rank, which still spreads evenly from about minus a half to plus a half. The order of the stocks is kept and the scale is thrown away, so the model sees which stocks did better than the others, which is what a long/short book trades.
+      A z-score does something similar while keeping distances: subtract the day's average and divide by the day's spread, its standard deviation. Winsorising caps the most extreme values, so one wild stock cannot dominate.
+      An interaction combines two features, for example momentum multiplied by volatility, for a model that cannot combine them by itself.
+      Fractional differencing, from López de Prado's book, is a way to make a price series stable, so its behaviour does not drift over time, while keeping more of its memory than plain returns do.
+      And one warning for anyone who goes on to use company accounts: companies sometimes correct, or restate, their numbers months later, and a database may show only the corrected figure. Using it on the original date leaks information nobody had then. Data stored as it was known on each date is called point-in-time data. That is leakage, which is the next slide.
+
+  - id: leakage
+    finance: "Data"
+    stage: Features
+    title: "Leakage, live"
+    layout: wide
+    run: 2
+    visual:
+      kind: image
+      file: "D_leak.png"
+    define:
+      - ["Leakage", "information the model could not have had at decision time sneaks into its inputs."]
+    lines:
+      - "It makes results look far better than they really are."
+      - "Watch: we add one feature that secretly reads tomorrow's price."
+    reading: 'Kaufman, Rosset, Perlich, Stitelman (2012), Leakage in Data Mining: Formulation, Detection, and Avoidance, ACM TKDD 6(4), art. 15'
+    reading_full:
+      - 'Kaufman, S., Rosset, S., Perlich, C. and Stitelman, O. (2012). "Leakage in Data Mining: Formulation, Detection, and Avoidance." ACM Transactions on Knowledge Discovery from Data, 6(4), Article 15.'
+    minutes: [27, 31]
+    notes: >-
+      Leakage means information from the future sneaking into the model's inputs.
+      Kaufman and colleagues describe it as one of the most common mistakes in data mining, because it makes a model look much better than it is.
+      In section 2 there is a deliberately leaky feature called LEAKY_ret_next, which uses tomorrow's return; run that cell and look at how good it looks.
+      Then notice it could never work live, because tomorrow has not happened yet. The notebook removes it straight after the demo.
+      The In finance tag says Data: market data arrives in time order, so the question is always what was known on that date. The point-in-time warning on the last slide is the same mistake, made by a database instead of by us.
+    cue: "▶ Notebook: run section 2, the leakage demo cell (LEAKY_ret_next)."
+
+  - id: baseline
+    stage: Model
+    title: "Baseline: predict zero"
+    layout: side
+    run: 3
+    visual:
+      kind: stat
+      big: "0"
+      label: "the forecast for every stock, every day"
+    define:
+      - ["Baseline", "the simplest possible forecast. A model must beat it before we celebrate."]
+    lines:
+      - "Short-term returns are so noisy that zero is surprisingly hard to beat."
+      - "**Score:** is our model's error smaller than the zero forecast's error?"
+    minutes: [31, 33]
+    notes: >-
+      Before any machine learning, we need something to beat.
+      The baseline here is the laziest forecast possible: predict a return of zero for every stock on every day.
+      Because short-term returns are so noisy, zero turns out to be a tough opponent.
+      Every model today is scored against it: if a model's errors are not smaller than zero's, the model has learned nothing useful.
+      Run section 3 now to score the zero model.
+    cue: "▶ Notebook: run section 3, first cells (the zero baseline)."
+
+  - id: time_split
+    finance: "Validation"
+    stage: Model
+    title: "Split by time, never at random"
+    layout: side
+    run: 3
+    define:
+      - ["Train / test", "train is the years the model learns from; test is later years it never sees until the end."]
+    lines:
+      - "Shuffling days at random lets the model learn from its test days' neighbours, even their future."
+      - "We leave a **gap** between train and test so 5-day targets cannot overlap."
+    visual:
+      kind: stack
+      items:
+        - {kind: image, file: "D_split.png"}
+        - {kind: result, id: "F4", file: "F4_split.png", caption: "Our split: training years, gap, test years"}
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, Wiley, ch. 7, Cross-Validation in Finance, §7.2'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 2 "Financial Data Structures"; Chapter 7 "Cross-Validation in Finance"; Chapter 11 "The Dangers of Backtesting". This slide: chapter 7, section 7.2.'
+    minutes: [33, 37]
+    notes: >-
+      To test a model fairly, we hide some data from it, train on the rest, then check it on the hidden part.
+      In most machine learning courses you shuffle rows at random, but in finance that leaks: neighbouring days are related, and a shuffled training set contains days just after a test day.
+      López de Prado explains why ordinary shuffled cross-validation fails on financial data.
+      So we split by time, train first, then a small gap, then test, and the gap stops five-day targets overlapping the boundary.
+      Task 3 in section 3: choose your own two dates.
+      The In finance tag says Validation: this is the finance side of that row of the table, testing on later years with a gap.
+    cue: "▶ Notebook: run section 3, Task 3 (train_end and test_start dates)."
+
+  - id: tiny_edge
+    finance: "Signal"
+    stage: Model
+    title: "What a tiny edge looks like"
+    layout: side
+    visual:
+      kind: chart_scatter
+      r: 0.1
+      n: 400
+      caption: "Synthetic illustration: forecast vs outcome with R² = 1%"
+    define:
+      - ["R²", "the share of the ups and downs a forecast explains. 1% explains one hundredth."]
+    lines:
+      - "Strong ML models on individual stock returns score an out-of-sample R² **under 1%**."
+      - "Out-of-sample means on data the model never saw."
+      - "Tiny, but over many stocks and many days it can still add up."
+    reading: 'Gu, Kelly, Xiu (2020), Empirical Asset Pricing via Machine Learning, Review of Financial Studies 33(5), 2223-2273'
+    reading_full:
+      - 'Gu, S., Kelly, B. and Xiu, D. (2020). "Empirical Asset Pricing via Machine Learning." The Review of Financial Studies, 33(5), 2223-2273.'
+    minutes: [37, 39]
+    notes: >-
+      Here is how small a real edge is.
+      Gu, Kelly and Xiu tested many machine learning methods on stock returns, and even the good ones explained under one percent of the ups and downs on data they had not seen.
+      The chart is synthetic: it shows what a relationship with an R squared of one percent looks like, and it looks like a cloud.
+      The lesson is not that machine learning is useless; it is that you must expect small numbers, and be suspicious of big ones.
+      The In finance tag says Signal: this is what tiny next to the noise means in numbers.
+
+  - id: tree
+    stage: Model
+    title: "A decision tree in one picture"
+    layout: side
+    lines:
+      - "A **decision tree** asks yes or no questions about the features, one after another."
+      - "Each end point, a **leaf**, holds the average target of the training rows that landed there."
+      - "Deeper trees ask more questions: more detail, and more room to memorise noise."
+    visual:
+      kind: image
+      file: "D_tree.png"
+    minutes: [39, 41]
+    notes: >-
+      A decision tree is the easiest model to picture.
+      It asks a yes or no question about a feature, then another, and each path ends in a leaf.
+      The leaf's forecast is simply the average target of the training examples that ended up there.
+      The numbers in this picture are made up for illustration; the important idea is depth: a deeper tree can fit more detail, including noise.
+
+  - id: forest
+    finance: "Models"
+    stage: Model
+    title: "A forest"
+    layout: side
+    run: 4
+    lines:
+      - "A **random forest** grows many trees, each on a random sample of the rows and features."
+      - "Its forecast is the **average** of all the trees."
+      - "Your knobs in Task 4: how many trees, and how deep."
+    visual:
+      kind: image
+      file: "D_forest.png"
+    reading: 'Breiman (2001), Random Forests, Machine Learning 45(1), 5-32'
+    reading_full:
+      - 'Breiman, L. (2001). "Random Forests." Machine Learning, 45(1), 5-32.'
+    minutes: [41, 45]
+    notes: >-
+      One tree is jumpy: change the data a little and the tree changes a lot.
+      Breiman's random forest grows many trees, each on a random sample of the data, and averages their forecasts, which is much steadier.
+      In Task 4 you choose the number of trees and the maximum depth, copying the example and changing two numbers.
+      Then compare its score with the zero baseline and a simple linear model in the table the notebook prints.
+      The In finance tag says Models: a random forest is one of the tree ensembles from the models row of the table.
+    cue: "▶ Notebook: run section 4 (Task 4: n_estimators and max_depth)."
+
+  - id: deciles
+    stage: Model
+    title: "Reading the decile plot"
+    layout: side
+    define:
+      - ["Decile", "sort the forecasts from lowest to highest and cut them into 10 equal groups."]
+    lines:
+      - "Each bar: the average real 5-day return of one group, on test data."
+      - "A useful model: bars rise from left to right, even if unevenly."
+      - "Krauss, Do and Huck ranked S&P 500 stocks by forecast the same way."
+    visual:
+      kind: result
+      id: "F1"
+      file: "F1_decile.png"
+      caption: "Average 5-day return by forecast decile, test period"
+    reading: 'Krauss, Do, Huck (2017), Deep neural networks, gradient-boosted trees, random forests: Statistical arbitrage on the S&P 500, European J. Operational Research 259(2), 689-702'
+    reading_full:
+      - 'Krauss, C., Do, X. A. and Huck, N. (2017). "Deep neural networks, gradient-boosted trees, random forests: Statistical arbitrage on the S&P 500." European Journal of Operational Research, 259(2), 689-702.'
+    minutes: [45, 48]
+    notes: >-
+      Scores like R squared are hard to feel, so here is a picture that is easier to read.
+      We sort every forecast in the test period from lowest to highest and cut them into ten equal groups, called deciles.
+      For each group we plot the average return that really happened next.
+      If the bars rise from left to right, the model's ranking carries information; Krauss, Do and Huck ranked S&P 500 stocks by model forecasts in a similar way.
+      Ours barely rise: the three lowest-forecast groups do earn the least, but the top group is not the best and the middle is a jumble. That is what a thin edge looks like, and the error bars show how much of it could be luck. Your notebook draws the same plot from the same forest.
+
+  - id: overfit
+    stage: Check
+    title: "Overfitting, live"
+    layout: side
+    run: 5
+    define:
+      - ["Overfitting", "learning the noise in the training data instead of a pattern that lasts."]
+    lines:
+      - "Experiment: add 30 columns of pure random numbers as extra features, to a forest with its brakes off."
+      - "Training score rises (about +48% to +60% R²); the test score stays below zero."
+    visual:
+      kind: result
+      id: "F2"
+      file: "F2_noise.png"
+      caption: "Train vs test score, real features vs real plus 30 noise features"
+    minutes: [48, 52]
+    notes: >-
+      Overfitting is when a model memorises the training data, noise included, instead of learning something that lasts.
+      Section 5 runs a live experiment: we add thirty columns of random numbers, which by construction contain no information.
+      For this demo the forest runs with its brakes off, no depth limit, so it can memorise. Watch the training score go up, from about forty-eight to about sixty percent, because a flexible model happily finds patterns in noise, while the test score stays negative.
+      That gap between training and test is the signature of overfitting. The cell takes ten to thirty seconds, depending on the machine, so start it and talk over it.
+    cue: "▶ Notebook: run section 5 (the noise experiment)."
+
+  - id: trying_many
+    finance: "Success"
+    stage: Check
+    title: "Trying many things is the problem"
+    layout: side
+    define:
+      - ["Sharpe ratio", "average yearly return divided by how much returns swing. Higher is better."]
+    lines:
+      - "Try about **7** versions of a useless strategy on 2 years of data and expect one with a Sharpe above 1, by luck alone."
+      - "So count your tries, and look at the test set once."
+    visual:
+      kind: chart_trials
+      years: 2
+      max_n: 50
+      caption: "Expected best Sharpe among N strategies with zero true skill, 2-year backtest (Bailey et al. approximation)"
+    reading: 'Bailey, Borwein, López de Prado, Zhu (2014), Pseudo-Mathematics and Financial Charlatanism, Notices of the AMS 61(5), 458-471'
+    reading_full:
+      - 'Bailey, D. H., Borwein, J. M., López de Prado, M. and Zhu, Q. J. (2014). "Pseudo-Mathematics and Financial Charlatanism: The Effects of Backtest Overfitting on Out-of-Sample Performance." Notices of the AMS, 61(5), 458-471. (open access at ams.org)'
+    minutes: [52, 54]
+    notes: >-
+      The Sharpe ratio is the standard score for a strategy: average yearly return divided by how much it swings, so higher is better.
+      Bailey and colleagues show that if you try enough variations, one will look great by luck alone.
+      With a two-year backtest, about seven tries of strategies with no skill at all is enough to expect one with a Sharpe ratio around one.
+      The curve is that calculation: it keeps rising as you try more, with zero real skill. This is why you should count your tries and touch the test set once.
+      The In finance tag says Success: in finance success is scored with numbers like the Sharpe ratio, and those are exactly the numbers that luck inflates when you try many things.
+
+  - id: portfolio
+    finance: "Success"
+    stage: Portfolio
+    title: "Forecast to portfolio, costs"
+    layout: side
+    run: 6
+    define:
+      - ["Long / short", "long: buy, gain if the price rises. Short: borrow and sell, gain if it falls."]
+    lines:
+      - "Every rebalance (your knob: 5, 10 or 21 trading days): buy the top 4 forecasts, short the bottom 4, equal sizes."
+      - "Each trade costs **5 bps** (basis points: 0.05%) of the amount traded."
+    visual:
+      kind: portfolio
+      n: 12
+      n_long: 4
+      n_short: 4
+    reading: 'López de Prado (2018), Advances in Financial Machine Learning, Wiley, ch. 11, The Dangers of Backtesting'
+    reading_full:
+      - 'López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley. Chapter 2 "Financial Data Structures"; Chapter 7 "Cross-Validation in Finance"; Chapter 11 "The Dangers of Backtesting". This slide: chapter 11.'
+    minutes: [54, 58]
+    notes: >-
+      A forecast is not yet a trade, so we turn forecasts into a portfolio.
+      Every rebalance, by default every twenty-one trading days, we rank the stocks by forecast, buy the top few and short the bottom few, in equal sizes. How often to rebalance is one of your knobs: five, ten or twenty-one days.
+      Going long means buying and gaining if the price rises; going short means borrowing shares and selling them, gaining if the price falls.
+      Every change of position costs money, and we charge five basis points, five hundredths of a percent, on each trade.
+      Task 5 in section 6: choose how many to buy, how many to short, and how often to rebalance. Rebalancing more often costs more.
+      The In finance tag says Success: in finance a result only counts after trading costs, and this is where the costs come in.
+    cue: "▶ Notebook: run section 6 (Task 5: n_long, n_short and rebalance_days)."
+
+  - id: survivorship
+    finance: "Data"
+    stage: Backtest
+    title: "Survivorship"
+    layout: side
+    define:
+      - ["Survivorship bias", "studying only the companies that survived until today."]
+    lines:
+      - "Our 40 were chosen because they still trade today. Firms that failed or were taken over are missing."
+      - "That makes the past look kinder than it was."
+      - "Even large research databases have missed delisted stocks' returns."
+    visual:
+      kind: image
+      file: "D_survivorship.png"
+    reading: 'Shumway (1997), The Delisting Bias in CRSP Data, J. Finance 52(1), 327-340'
+    reading_full:
+      - 'Shumway, T. (1997). "The Delisting Bias in CRSP Data." The Journal of Finance, 52(1), 327-340.'
+    minutes: [58, 60]
+    notes: >-
+      Here is the honest flaw in our data.
+      We picked companies that still trade today, so every company that went bust or was taken over between 2000 and 2019 is missing.
+      An investor in 2000 could not have known which companies would survive, so our backtest gets a hint from the future.
+      Shumway showed that even a major research database was missing many delisting returns, so this is a real problem, not a classroom one.
+      The In finance tag says Data: what is missing from a dataset can matter as much as what is in it.
+
+  - id: backtest
+    stage: Backtest
+    title: "Your backtest, read honestly"
+    layout: side
+    size: 18            # four text items: one size down so the column fits under the strip
+    run: 7
+    define:
+      - ["Backtest", "replaying the strategy on past test years, with costs."]
+      - ["Drawdown", "the fall from the highest point so far. Max drawdown is the worst one."]
+    lines:
+      - "Read it **before and after costs**: at 5 bps, costs decide whether a thin edge survives."
+      - "The equal-weight line is **the market, for scale**, not a benchmark. One period, one biased universe: evidence, not proof."
+    visual:
+      kind: result
+      id: "F3"
+      file: "F3_equity.png"
+      caption: "Growth of 100: the reference strategy before and after costs, with the market line for scale. Your notebook draws yours."
+    reading: 'Arnott, Harvey, Markowitz (2019), A Backtesting Protocol in the Era of Machine Learning, J. Financial Data Science 1(1), 64-74'
+    reading_full:
+      - 'Arnott, R., Harvey, C. R. and Markowitz, H. (2019). "A Backtesting Protocol in the Era of Machine Learning." The Journal of Financial Data Science, 1(1), 64-74.'
+    minutes: [60, 65]
+    notes: >-
+      Run section 7: it backtests your strategy with your five knobs, after costs, on the test years.
+      Read four numbers: total return, Sharpe ratio, max drawdown, which is the worst fall from a peak, and turnover.
+      Look at the strategy before and after costs: with the reference knobs the edge is thin, so five basis points a trade decides whether anything is left: the five-day version of the same book paid nearly forty percent of its value in costs over the five years and ended in the red. The differences between rebalance frequencies before costs are mostly luck of the path, so do not read them as a ranking. The equal-weight line, all forty stocks held long, is the market drawn for scale; a dollar-neutral long/short book is not trying to beat it.
+      Arnott, Harvey and Markowitz give a checklist for honest backtests; by that standard, one test period on a survivorship-biased universe is evidence, not proof.
+    cue: "▶ Notebook: run section 7 (your strategy's backtest)."
+
+  - id: export
+    stage: Backtest
+    stage_tail: "take it home"
+    title: "Export, paper trading, Part 2, QR codes"
+    layout: side
+    run: 8
+    lines:
+      - "**Export:** download your ZIP, with your model, settings and strategy code."
+      - "**Paper trading** is practice with pretend money. In this room: **preview only**, it proposes orders and sends nothing."
+      - "**Part 2 next week:** purged cross-validation, triple-barrier labels, feature importance, deflated Sharpe."
+      - "**Nothing here is investment advice.**"
+    visual:
+      kind: qr
+    reading: 'Part 2: Bailey, López de Prado (2014), The Deflated Sharpe Ratio, J. Portfolio Management 40(5), 94-107'
+    reading_full:
+      - 'Bailey, D. H. and López de Prado, M. (2014). "The Deflated Sharpe Ratio: Correcting for Selection Bias, Backtest Overfitting, and Non-Normality." The Journal of Portfolio Management, 40(5), 94-107. (Part 2 reading.)'
+    minutes: [65, 71]
+    notes: >-
+      Run section 8: it saves your strategy and lets you download the ZIP, so please download it now, because Colab forgets everything when the session ends.
+      The demo runs run_paper.py in preview mode against an offline mock broker, so it needs no account and sends nothing; at home the same script talks to an Alpaca paper account, which is practice with pretend money, and still submits nothing unless you ask it to.
+      Part 2 next week fixes the problems we only named today: purged cross-validation, triple-barrier labels, feature importance and the deflated Sharpe ratio.
+      Nothing in this workshop is investment advice. Scan the codes to follow QuantSoc, and thank you.
+      If there is time, the bonus section on learning theory follows straight after this slide; it needs no notebook.
+    cue: "▶ Notebook: run section 8 (export ZIP, then the run_paper.py --preview demo)."
