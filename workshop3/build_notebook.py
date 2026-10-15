@@ -566,7 +566,8 @@ plots.equity(final, "Final test, 2023 to today, after costs", log=False);
 ''')
 md("""
 *Discuss:* did the improvements chosen on 2004 to 2022 survive? If not, was it the idea, or the threshold we picked
-by looking at part 8?
+by looking at part 8? Look at **when** the filtered version actually traded: how many separate episodes is its
+result built on, and would you bet money on that sample size?
 """)
 
 # ------------------------------------------------------------------------------------------- 13 live
