@@ -77,6 +77,16 @@ st.caption("Krauss, Do & Huck (2017): each day, long the k stocks most likely to
 api_key, api_secret, key_source = get_credentials(dotenv_paths=[ROOT / ".env", Path.cwd() / ".env"])
 have_keys = bool(api_key and api_secret)
 
+
+def safe(err) -> str:
+    """Error text with the keys removed, in case a library quoted a request header."""
+    text = str(err)
+    for value, label in ((api_secret, "[secret]"), (api_key, "[key]")):
+        if value:
+            text = text.replace(value, label)
+    return text
+
+
 # Defaults go into session state first, so the widgets below never get two competing defaults.
 st.session_state.setdefault("mode", ALPACA if have_keys else OFFLINE)
 st.session_state.setdefault("strategy_path", DEFAULT_STRATEGY)
@@ -88,7 +98,8 @@ with st.sidebar:
     if have_keys:
         st.caption(f"Alpaca keys: found in {key_source}")
     else:
-        st.caption("Alpaca keys: not found. Copy `.env.example` to `.env` in the repo root and paste your PAPER keys.")
+        st.caption("Alpaca keys: not found. Copy `.env.example` to `.env` in the repo root and paste your PAPER keys."
+                   if key_source == "not found" else f"Alpaca keys: found in {key_source}")
     st.divider()
     strategy_text = st.text_input("Saved strategy file", key="strategy_path",
                                   help="Made with statarb.save_strategy. If the file does not exist, "
@@ -114,7 +125,7 @@ if strategy_path.is_file():
     try:
         strategy = saved_strategy(str(strategy_path), strategy_path.stat().st_mtime)
     except Exception as e:
-        st.error(f"Could not load {strategy_path}: {e}")
+        st.error(safe(f"Could not load {strategy_path}: {e}"))
         st.stop()
     source_line = f"Loaded your saved strategy from `{strategy_path}`."
 else:
@@ -133,12 +144,11 @@ try:
     with st.spinner("Fetching prices and scoring today's signal..."):
         plan = live.build_live_plan(ReadOnlyBroker(broker), strategy)
 except (BrokerError, ValueError) as e:
-    st.error(f"Could not build today's plan: {e}")
+    st.error(safe(f"Could not build today's plan: {e}"))
     st.stop()
 
-# Remember which orders were on screen, so Submit can check nothing changed in between.
-seen_fingerprint = st.session_state.get("orders_fingerprint")
-st.session_state["orders_fingerprint"] = plan.fingerprint
+# The plan drawn on the PREVIOUS run is the one the user looked at; Submit sends exactly that one.
+shown_plan = st.session_state.get("shown_plan")
 
 # ---- account and clock
 st.subheader("Account and market")
@@ -158,7 +168,8 @@ elif mode == OFFLINE:
 # ---- today's signal
 st.subheader("Today's signal")
 st.write(f"Decision date **{plan.decision_date:%A %d %B %Y}**: the last completed trading day. "
-         "Orders sent now fill at or after the next open.")
+         "While the market is open, market orders fill straight away at the current price (not at the close "
+         "the signal used). While it is closed, they wait for the next open.")
 sig = live.signal_table(plan)
 left, right = st.columns(2)
 with left:
@@ -215,6 +226,7 @@ for note in plan.notes:
     st.caption(f"Note: {note}")
 if plan.open_orders:
     st.warning(f"Open orders already exist for {', '.join(plan.open_orders)}.")
+busy = sorted(set(plan.open_orders) & set(plan.orders["symbol"]))
 
 # ---- submit (Alpaca paper only)
 st.subheader("Submit")
@@ -229,16 +241,17 @@ if mode == ALPACA and getattr(broker, "paper", False) is True:
     if already:
         st.info("Orders for this decision date were already submitted from this page. Come back after the "
                 "next trading day closes.")
-    ready = ok and typed.strip() == live.CONFIRM_WORD and len(plan.orders) > 0 and not already
+    ready = ok and typed.strip() == live.CONFIRM_WORD and len(plan.orders) > 0 and not already and not busy
     clicked = st.button("Submit PAPER orders", type="primary", disabled=not ready, key="submit")
     if clicked and ready:  # never on page load: only a click, after the checks above
         try:
-            results = live.submit_plan(broker, plan, confirmed=ok, typed=typed,
-                                       expected_fingerprint=seen_fingerprint)
+            if shown_plan is None or shown_plan.decision_date != plan.decision_date:
+                raise Refused("refused: the page changed before the click; look at the orders again, then submit")
+            results = live.submit_plan(broker, shown_plan, confirmed=ok, typed=typed)
             sent_dates.append(f"{plan.decision_date:%Y-%m-%d}")
             st.session_state["last_results"] = live.results_table(results)
         except (Refused, BrokerError) as e:
-            st.error(str(e))
+            st.error(safe(e))
     if "last_results" in st.session_state:
         res = st.session_state["last_results"]
         counts = res["status"].value_counts().to_dict() if len(res) else {}
@@ -254,7 +267,7 @@ try:
     hist = live.equity_history(broker)
 except BrokerError as e:
     hist = None
-    st.caption(str(e))
+    st.caption(safe(e))
 if hist is None or len(hist) == 0:
     st.caption("No equity history yet" + (" (not available in the offline demo)." if mode == OFFLINE else "."))
 else:
@@ -265,9 +278,12 @@ try:
     recent = live.recent_orders(broker)
 except BrokerError as e:
     recent = None
-    st.caption(str(e))
+    st.caption(safe(e))
 if recent is not None:
     if len(recent) == 0:
         st.caption("No orders yet.")
     else:
         st.dataframe(recent, hide_index=True)
+
+# Remember the plan that is now on screen: the next click submits exactly this one.
+st.session_state["shown_plan"] = plan

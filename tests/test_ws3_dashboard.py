@@ -309,3 +309,79 @@ def test_alpaca_read_adapters_with_a_fake_trading_client():
     assert list(hist["equity"]) == [100_000.0, 100_500.0] and broker._trading.history_req.timeframe == "1D"
     orders = live.recent_orders(broker)
     assert orders.loc[0, "symbol"] == "BRK-B" and orders.loc[0, "side"] == "sell" and orders.loc[0, "filled"] == 3.0
+
+
+# --------------------------------------------------------------------------- regressions from the review
+
+def test_credentials_are_stripped_and_inner_whitespace_refused(monkeypatch, tmp_path):
+    from quantsoc_ml import paper as Pp
+    monkeypatch.setenv("APCA_API_KEY_ID", "  PKFAKE123 ")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "fakesecret456\n")
+    assert Pp.get_credentials([tmp_path / ".env"]) == ("PKFAKE123", "fakesecret456", "environment variables")
+    monkeypatch.setenv("APCA_API_KEY_ID", "PKFAKE 123")
+    k, s, src = Pp.get_credentials([tmp_path / ".env"])
+    assert k is None and s is None and "space or line break" in src and "PKFAKE" not in src
+
+
+def test_alpaca_broker_scrubs_keys_from_error_messages():
+    from quantsoc_ml.paper import AlpacaPaperBroker, BrokerError
+    b = AlpacaPaperBroker("PKFAKEKEY0001", "FAKESECRET0001")          # builds clients only, no network
+
+    def boom():
+        raise ValueError("Invalid header value b'FAKESECRET0001\\n' for PKFAKEKEY0001")
+    with pytest.raises(BrokerError) as e:
+        b._call(boom)
+    assert "FAKESECRET0001" not in str(e.value) and "PKFAKEKEY0001" not in str(e.value)
+    assert "FAKESECRET" not in repr(b)
+
+
+def test_held_long_in_an_unshortable_worst_name_is_closed(strategy, broker_bars):
+    base = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=broker_bars)), strategy)
+    worst = base.scores.sort_values().index[0]
+    mock = MockBroker(bars=broker_bars, not_shortable=[live.to_alpaca(worst)], positions={live.to_alpaca(worst): 100})
+    plan = live.build_live_plan(ReadOnlyBroker(mock), strategy)
+    assert worst in plan.skipped_shorts and plan.weights[worst] == 0.0
+    row = plan.orders[plan.orders["symbol"] == worst]
+    assert list(row["action"]) == ["close long"] and float(row["qty"].iloc[0]) == 100
+
+
+def test_flip_while_market_closed_sends_only_the_closing_leg(strategy, broker_bars):
+    base = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=broker_bars)), strategy)
+    short_name = base.shorts.index[0]
+    mock = FakeAlpaca(bars=broker_bars, cash=100_000.0, positions={live.to_alpaca(short_name): 10})
+    plan = live.build_live_plan(ReadOnlyBroker(mock), strategy)
+    assert not plan.clock.get("is_open")
+    results = live.submit_plan(mock, plan, confirmed=True, typed="SUBMIT")
+    legs = {r.client_order_id.rsplit(live.to_alpaca(short_name) + "-", 1)[-1]: r.status
+            for r in results if r.symbol == live.to_alpaca(short_name)}
+    assert legs == {"close-long": "filled", "open-short": "not sent"}
+    assert mock.positions().get(live.to_alpaca(short_name), 0) == 0
+
+
+@pytest.mark.parametrize("hour,is_open,kept", [(8, False, False), (11, True, False), (17, False, True)])
+def test_todays_bar_is_used_only_after_the_close(hour, is_open, kept):
+    bars = pd.DataFrame({"date": pd.to_datetime(["2026-10-15", "2026-10-16"]), "symbol": "A",
+                         "close": 1.0, "adj_close": 1.0, "volume": 1.0})
+    clock = {"is_open": is_open, "timestamp": pd.Timestamp(f"2026-10-16 {hour:02d}:30", tz="America/New_York")}
+    assert (len(live.drop_today_until_close(bars, clock)) == 2) == kept
+
+
+def test_app_submits_the_plan_on_screen_even_if_equity_moved(saved, broker_bars, monkeypatch):
+    monkeypatch.setenv("APCA_API_KEY_ID", FAKE_KEY)
+    monkeypatch.setenv("APCA_API_SECRET_KEY", FAKE_SECRET)
+    fakes = []
+
+    def connect(key, secret):        # every rerun sees a different equity, as during market hours
+        fakes.append(FakeAlpaca(bars=broker_bars, cash=100_000.0 + 7_777.0 * len(fakes)))
+        return fakes[-1]
+    monkeypatch.setattr(live, "connect_alpaca", connect)
+    at = _app(saved, "Alpaca paper").run()
+    at.checkbox(key="confirm_box").check().run()
+    at.text_input(key="confirm_text").input("SUBMIT").run()
+    shown = at.session_state["shown_plan"]
+    [b for b in at.button if b.key == "submit"][0].click().run()
+    assert not at.exception and not at.error, [e.value for e in at.error]
+    sent = [f for f in fakes if f.submissions]
+    assert len(sent) == 1
+    assert [(s["symbol"], s["qty"]) for s in sent[0].submissions] == \
+        [(r.alpaca_symbol, float(r.qty)) for r in shown.orders.itertuples()]

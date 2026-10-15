@@ -28,9 +28,10 @@ def purged_kfold(dates: Sequence, n_splits: int = 5, label_horizon: int = 1,
     """Yield (train_mask, test_mask) boolean arrays over `dates` (one entry per ROW, e.g. the panel's date level).
 
     The unique dates are cut into `n_splits` consecutive blocks. For each test block:
-      * purge: drop training dates within `label_horizon` days BEFORE the block, whose labels
-        look into the block's prices;
-      * embargo: drop `embargo` training dates right AFTER the block.
+      * purge: drop training dates within `label_horizon` days of the block on EITHER side, because
+        their label windows overlap the block's labels;
+      * embargo: drop a further `embargo` dates after the block (if larger than label_horizon),
+        because features built from long overlapping windows also carry information across.
     With label_horizon=0 and embargo=0 this is plain k-fold over date blocks (no shuffling).
     """
     d = pd.DatetimeIndex(pd.to_datetime(np.asarray(dates)))
@@ -40,7 +41,7 @@ def purged_kfold(dates: Sequence, n_splits: int = 5, label_horizon: int = 1,
     for b in blocks:
         lo, hi = b[0], b[-1]
         test = (pos >= lo) & (pos <= hi)
-        banned = (pos >= lo - label_horizon) & (pos <= hi + embargo)
+        banned = (pos >= lo - label_horizon) & (pos <= hi + max(label_horizon, embargo))
         yield ~banned, test
 
 

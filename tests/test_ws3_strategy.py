@@ -138,8 +138,11 @@ def test_purged_kfold_removes_overlap_and_embargo():
         t_dates = cal.get_indexer(days[test])
         tr_dates = cal.get_indexer(days[train])
         lo, hi = t_dates.min(), t_dates.max()
-        assert not ((tr_dates >= lo - 2) & (tr_dates <= hi + 1)).any()
-    assert [len(np.unique(days[tr])) for tr, _ in folds] == [14, 12, 12, 13]
+        assert not ((tr_dates >= lo - 2) & (tr_dates <= hi + 2)).any()     # purged on both sides
+    assert [len(np.unique(days[tr])) for tr, _ in folds] == [13, 11, 11, 13]
+    # a larger embargo extends the gap after the block only
+    folds = list(rs.purged_kfold(dates, 4, label_horizon=1, embargo=3))
+    assert [len(np.unique(days[tr])) for tr, _ in folds] == [12, 11, 11, 14]
 
 
 def test_cache_covers_every_trading_day_once():
@@ -159,3 +162,20 @@ def test_notebook_text_has_no_dashes_and_no_outputs():
         assert not re.search("[–—]", text), text[:80]
         if cell["cell_type"] == "code":
             assert cell["outputs"] == [] and cell["execution_count"] is None
+
+
+def test_last_day_without_a_next_day_return_is_not_traded():
+    P = toy_prices(n_days=300)
+    panel = sa.make_panel(P, lags=[1, 5])
+    ls = sa.long_short(-panel["R1"], panel["fwd"], k=5)
+    assert ls.gross.index[-1] == P.index[-2]          # P.index[-1] has no tomorrow yet
+
+
+def test_hit_rate_ignores_flat_days_and_window_slices():
+    r = pd.Series([0.01, -0.01, 0.0, 0.0, 0.02], index=pd.bdate_range("2020-01-01", periods=5))
+    assert sa.perf_stats(r)["hit rate"] == pytest.approx(2 / 3)
+    P = toy_prices(n_days=300)
+    panel = sa.make_panel(P, lags=[1, 5])
+    ls = sa.long_short(-panel["R1"], panel["fwd"], k=5)
+    w = ls.window(end=P.index[200])
+    assert w.net.index.max() <= P.index[200] and w.net.equals(ls.net.loc[:P.index[200]])

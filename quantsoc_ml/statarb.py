@@ -10,9 +10,12 @@ The paper's recipe, and where this module differs:
 * Trading: each day rank stocks by predicted probability, long the top k, short the bottom k, equal
   weights, close everything the next day. The paper reports returns for $1 long and $1 short, i.e.
   mean(long legs) - mean(short legs); `long_short` does the same.
-* Costs: the paper charges 5 bps per half-turn and assumes the whole book turns over every day
-  (4 half-turns, 20 bps per day). `long_short` charges cost on the turnover that actually happened,
-  which is a little cheaper because some names stay in the book from one day to the next.
+* Costs: the paper charges 5 bps per half-turn; its 0.45% a day before costs falling to about 0.25%
+  after implies the whole book is charged as turning over every day (20 bps a day). `long_short`
+  charges cost on the turnover that actually happened, which is much cheaper (about 11 bps a day
+  instead of 20 in our run) because many names stay in the book from one day to the next.
+* Ensemble: like the paper, the plain average of the three ML models (forest, boosting, neural
+  net). The logistic regression is our extra baseline and is not in the ensemble.
 
 Differences, stated: our universe is today's S&P 100 (survivorship-biased), not the point-in-time
 S&P 500; our models are smaller than the paper's so a laptop or Colab trains them in minutes; the
@@ -159,6 +162,7 @@ def make_model(name: str, preset: str = "workshop", seed: int = 0):
 
 
 MODEL_NAMES = ("logit", "forest", "boosting", "mlp")
+ENSEMBLE_MODELS = ("forest", "boosting", "mlp")      # the paper averages its three ML models
 
 
 def fit_predict_period(panel: pd.DataFrame, period: StudyPeriod, models: Sequence[str], preset: str = "workshop",
@@ -184,8 +188,8 @@ def walk_forward(panel: pd.DataFrame, models: Sequence[str] = ("logit", "forest"
                  progress: Optional[Callable[[str], None]] = print) -> pd.DataFrame:
     """Out-of-sample predictions for every trading day, one model retrained per study period.
 
-    Adds `ensemble` (the plain average of the models' probabilities, the paper's ENS1) when more
-    than one model ran. Returns index (date, symbol) with one probability column per model.
+    Adds `ensemble`, the plain average of the paper's three ML models, when all three ran (the
+    logit baseline is left out, as in the paper). Returns index (date, symbol), one column per model.
     """
     periods = periods or study_periods(panel.index.get_level_values("date").unique())
     parts = []
@@ -196,8 +200,8 @@ def walk_forward(panel: pd.DataFrame, models: Sequence[str] = ("logit", "forest"
         if progress:
             progress(f"{p}  ({time.time() - t0:.0f}s)")
     out = pd.concat(parts).sort_index()
-    if len(models) > 1:
-        out["ensemble"] = out[list(models)].mean(axis=1)
+    if all(m in models for m in ENSEMBLE_MODELS):
+        out["ensemble"] = out[list(ENSEMBLE_MODELS)].mean(axis=1)
     return out
 
 
@@ -225,7 +229,7 @@ def banded_weights(scores: pd.Series, k: int = 10, exit_k: int = 20) -> pd.Serie
 
     New names enter from the top (bottom) of the ranking, and each leg is topped back up to k names.
     Fewer changes per day means less turnover and lower costs; the price is holding some names whose
-    signal has faded. exit_k = k gives back daily_weights.
+    signal has faded. exit_k = k gives the same book as daily_weights, up to how ties are broken.
     """
     W = scores.dropna().unstack("symbol")
     vals = W.to_numpy()
@@ -272,6 +276,12 @@ class LongShort:
     short_leg: pd.Series
     cost_bps: float
 
+    def window(self, start=None, end=None) -> "LongShort":
+        """The same backtest restricted to dates from `start` to `end` (inclusive)."""
+        cut = lambda s: s.loc[start:end]
+        return LongShort(cut(self.gross), cut(self.net), cut(self.turnover), cut(self.long_leg),
+                         cut(self.short_leg), self.cost_bps)
+
     def stats(self) -> Dict[str, float]:
         return {**{f"{k} (before costs)": v for k, v in perf_stats(self.gross).items() if k in ("mean daily", "annual return", "Sharpe")},
                 **perf_stats(self.net), "daily turnover": float(self.turnover.mean())}
@@ -285,6 +295,8 @@ def long_short(scores: pd.Series, fwd: pd.Series, k: int = 10, cost_bps: float =
     of the short leg. Cost = cost_bps per unit of turnover (each $ bought or sold is one half-turn).
     exit_k: keep held names until they leave the top/bottom exit_k (see banded_weights).
     """
+    known = fwd.dropna().index.get_level_values("date").unique()      # the last date has no next-day return yet
+    scores = scores[scores.index.get_level_values("date").isin(known)]
     w = daily_weights(scores, k) if exit_k is None or exit_k <= k else banded_weights(scores, k, exit_k)
     W = w.unstack("symbol").fillna(0.0)
     R = fwd.reindex(w.index).unstack("symbol").reindex(index=W.index, columns=W.columns).fillna(0.0)
@@ -308,7 +320,7 @@ def perf_stats(daily: pd.Series) -> Dict[str, float]:
             "annual vol": float(sd * np.sqrt(TRADING_DAYS_PER_YEAR)),
             "Sharpe": float(daily.mean() / sd * np.sqrt(TRADING_DAYS_PER_YEAR)) if sd > 0 else float("nan"),
             "max drawdown": float((eq / eq.cummax() - 1).min()),
-            "hit rate": float((daily > 0).mean()),
+            "hit rate": float((daily > 0).sum() / max((daily != 0).sum(), 1)),    # share of days with a position that made money
             "days": int(len(daily))}
 
 
@@ -436,10 +448,9 @@ CACHE_FILE = DATA_FILE.parent / "predictions_workshop.csv.gz"
 
 
 def load_cached_predictions(path: Optional[Union[str, Path]] = None) -> pd.DataFrame:
-    """Walk-forward predictions saved by workshop3/build_cache.py, plus the `ensemble` average column."""
+    """Walk-forward predictions saved by workshop3/build_cache.py, plus the `ensemble` column (forest, boosting, mlp)."""
     df = pd.read_csv(path or CACHE_FILE, parse_dates=["date"]).set_index(["date", "symbol"]).sort_index()
-    models = [c for c in MODEL_NAMES if c in df.columns]
-    df["ensemble"] = df[models].mean(axis=1)
+    df["ensemble"] = df[list(ENSEMBLE_MODELS)].mean(axis=1)
     return df
 
 

@@ -58,7 +58,9 @@ account. No slides: we walk through this notebook together. Run each cell when w
 | 13 | Going live: the paper-trading dashboard |
 
 > **Disclosure.** Prices are real (Yahoo Finance via `yfinance`) but the universe is **today's** S&P 100, so it is
-> survivorship-biased: companies that failed or left the index are missing. Teaching only, not investment advice.
+> survivorship-biased: companies that failed or left the index are missing. Alphabet appears twice (GOOG and GOOGL,
+> two share classes). One known Yahoo error (Danaher's 2016 spin-off) is repaired in `fetch_data.py`.
+> Teaching only, not investment advice.
 """)
 meme("title, e.g. 'stonks'")
 
@@ -141,15 +143,18 @@ print("Ready.")
 md("""
 ## 1. The paper in five lines
 
-1. **Universe:** every stock in the S&P 500, using the index members **as they were** on each date.
+1. **Universe:** every stock that was in the S&P 500 at the end of each training window (the paper rebuilds the
+   list from month-end index memberships), so companies that later failed are included.
 2. **Features:** 31 past returns per stock: over the last 1, 2, ..., 20 days, then 40, 60, ..., 240 days.
 3. **Target:** will this stock beat the **median** stock tomorrow? A yes/no question, so it is classification.
-4. **Models:** a deep neural net, gradient-boosted trees, a random forest, and their average (the "ensemble").
+4. **Models:** a deep neural net, gradient-boosted trees, a random forest, and the average of the three (the
+   "ensemble"). We add a logistic regression as a simple baseline; it is not in the ensemble.
 5. **Trading:** every day, buy the 10 stocks most likely to beat the median and short the 10 least likely.
    Close everything the next day and repeat.
 
-**Their result:** large returns before trading costs in the 1990s, much weaker after 2001, a spike in the 2008
-crisis, and close to nothing after costs from 2010. The paper itself says the edge decays.
+**Their result:** huge returns in the 1990s, even after trading costs; much weaker from 2001; a spike in the 2008
+crisis; and losses after costs from 2010 (about minus 14 to minus 25% a year), although returns before costs
+stayed positive. The paper itself says the edge decays.
 
 **Our question:** does the recipe find anything on large US stocks from 2004 to **yesterday**?
 
@@ -216,7 +221,8 @@ next day's returns. We average it over all days. IC = 0.02 sounds tiny, but repe
 it is a real signal.
 """)
 code('''
-research = panel.loc["2004":"2022"]           # keep 2023 onwards untouched for the final test
+RESEARCH_END = "2022-12-31"                  # 2023 onwards stays unseen until the final test in part 12
+research = panel.loc["2004":RESEARCH_END]
 ic = pd.Series({f: sa.daily_ic(research[f], research["fwd"]).mean() for f in sa.FEATURES})
 plots.bar(ic, "Mean daily IC of each feature, 2004 to 2022 (negative = past winners lose tomorrow)", "IC");
 ''')
@@ -254,17 +260,17 @@ for p in periods[:2] + periods[-2:]:
 plots.periods_timeline(periods);
 ''')
 md("""
-Let's train **one** study period live: the random forest on period 20 (trading late 2022 to late 2023).
+Let's train **one** study period live: the random forest on period 19 (trading late 2021 to late 2022).
 """)
 code('''
-p = periods[19]
+p = periods[18]
 t0 = time.time()
 live_pred, fitted = sa.fit_predict_period(panel, p, ["forest"])
 print(p, f"\\ntrained and predicted in {time.time() - t0:.1f}s, {len(live_pred):,} predictions")
 display(live_pred.head())
 ''')
 md("""
-Training all 23 periods for four models takes about 4 minutes on a laptop, longer on Colab. So we load
+Training all 23 periods for four models takes about 5 minutes on a laptop, longer on Colab. So we load
 predictions made earlier by the **same code** (`workshop3/build_cache.py`) and check them against the period we
 just trained live. If someone had edited the cache, this check would catch it.
 """)
@@ -277,8 +283,12 @@ else:
     pred = sa.load_cached_predictions()
     cached = pred.loc[live_pred.index, "forest"]
     gap = (cached - live_pred["forest"]).abs().max()
-    print(f"cache vs live retrain, period {p.number}: largest difference {gap:.5f}",
-          "(match)" if gap < 1e-3 else "(DIFFERENT: different library versions give slightly different trees)")
+    agree = cached.rank().corr(live_pred["forest"].rank())
+    if gap < 1e-3:
+        print(f"cache vs live retrain, period {p.number}: identical (largest difference {gap:.5f})")
+    else:   # a different scikit-learn version grows slightly different trees
+        print(f"cache vs live retrain, period {p.number}: same model up to library version "
+              f"(largest difference {gap:.3f}, rank correlation {agree:.3f})")
 print(f"{len(pred):,} out-of-sample predictions, models: {[c for c in pred.columns if c != 'period']}")
 ''')
 
@@ -286,13 +296,13 @@ print(f"{len(pred):,} out-of-sample predictions, models: {[c for c in pred.colum
 md("""
 ## 6. Did the models learn anything?
 
-Three checks per model on every out-of-sample day: **accuracy** (is P > 0.5 right?), **AUC** (does a higher P
+Three checks per model on every out-of-sample day up to the end of 2022: **accuracy** (is P > 0.5 right?), **AUC** (does a higher P
 mean a higher chance of beating the median?), and the mean daily **IC** with the next-day return.
 """)
 code('''
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-oos = pred.join(panel[["fwd", "y"]]).dropna(subset=["y"])
+oos = pred.join(panel[["fwd", "y"]]).dropna(subset=["y"]).loc[:RESEARCH_END]
 models = ["logit", "forest", "boosting", "mlp", "ensemble"]
 rows = {}
 for m in models:
@@ -322,26 +332,32 @@ short leg's.
 
 **Costs:** the paper charges 5 basis points (0.05%) per half-turn, i.e. on every dollar bought or sold. We charge
 the same on the turnover that actually happens.
+
+From here to part 12 every number covers **2004 to 2022** only. 2023 onwards is the final test, run once at the end.
 """)
 code('''
 K, COST_BPS = 10, 5.0
-results = {m: sa.long_short(pred[m], panel["fwd"], k=K, cost_bps=COST_BPS) for m in models}
+full = {m: sa.long_short(pred[m], panel["fwd"], k=K, cost_bps=COST_BPS) for m in models}
+results = {m: r.window(end=RESEARCH_END) for m, r in full.items()}        # 2004 to 2022 only
 table = pd.DataFrame({m: r.stats() for m, r in results.items()}).T
 display(table.style.format({c: "{:.4f}" for c in table.columns}))
 ''')
 code('''
 ens = results["ensemble"]
 plots.equity({"ensemble, before costs": ens.gross, "ensemble, after 5 bps costs": ens.net},
-             "Krauss et al. replication on the S&P 100, every day out of sample");
+             "Krauss et al. replication on the S&P 100, out of sample, 2004 to 2022");
 plots.bar(pd.DataFrame({"before costs": sa.yearly(ens.gross), "after costs": sa.yearly(ens.net)})["after costs"],
           "Ensemble return per calendar year after costs", "return", pct=True);
 ''')
 md("""
-**How to read this.** Before costs the ensemble earns a few basis points a day, with a Sharpe ratio around 0.9 in
-our run. But it trades more than twice its book every day, so 5 bps per half-turn costs more than it earns in most
-years. The profitable years cluster in **2007 to 2011**, around the financial crisis, just as in the paper.
+**How to read this.** Before costs the ensemble earns about 7 basis points a day, a Sharpe ratio of roughly 0.9
+in our run. But it buys and sells about \\$2.2 for every \\$1 long and \\$1 short each day (more than half the book
+is replaced daily), so 5 bps per half-turn costs about 11 bps a day, more than it earns in most years. The one
+clearly profitable year after costs is **2008** (about +30%), the financial crisis; 2005 and 2010 are just above
+zero. That fits the paper: the edge lives in crises.
 
-*Discuss:* the paper found about 0.45% a day before costs on the whole S&P 500 in the 1990s. Ours is far smaller.
+*Discuss:* the paper found about 0.45% a day before costs on the whole S&P 500, averaged over December 1992 to
+October 2015 (and far more than that in the 1990s). Ours is far smaller.
 Name three reasons. (Universe: 100 mega-caps are the most efficiently priced stocks in the world; period: the
 anomaly was published and traded away; model size: ours are smaller.)
 """)
@@ -356,9 +372,9 @@ taking the other side. Split the out-of-sample days by how volatile the market w
 time, so no peeking).
 """)
 code('''
-cuts = {"2004-2007 before the crisis": ("2004-01-01", "2008-08-31"), "2008-2009 crisis": ("2008-09-01", "2009-12-31"),
+cuts = {"2004 to Aug 2008": ("2004-01-01", "2008-08-31"), "Sep 2008 to 2009 crisis": ("2008-09-01", "2009-12-31"),
         "2010-2019": ("2010-01-01", "2019-12-31"), "2020 Covid": ("2020-01-01", "2020-12-31"),
-        "2021-2022": ("2021-01-01", "2022-12-31"), "2023 to today (final test)": ("2023-01-01", "2030-01-01")}
+        "2021-2022": ("2021-01-01", "2022-12-31")}
 display(sa.by_period(ens.gross, cuts)[["mean daily", "Sharpe"]].rename(columns=lambda c: c + " before costs")
         .join(sa.by_period(ens.net, cuts)[["annual return", "Sharpe", "max drawdown"]]).style.format("{:.4f}"))
 ''')
@@ -384,7 +400,8 @@ Two ways to ask a random forest which features matter (Lopez de Prado 2018, *Adv
 Learning*, ch. 8):
 
 * **MDI** (mean decrease in impurity): how much each feature's splits cleaned up the **training** data. Fast, but
-  biased towards noisy, many-valued features and blind to whether the split generalises.
+  computed in-sample, so every feature gets some importance even if it has no predictive power, and it says
+  nothing about whether a split generalises.
 * **Permutation importance**: shuffle one feature in **test** data and measure how much AUC drops. Slower, honest.
 
 We use the forest trained live in part 5 and the 250 days it traded.
@@ -469,7 +486,7 @@ for m in models:
     for k in (5, 10, 20):
         for exit_k in (None, 2 * k):
             name = f"{m} k={k}" + (f" exit={exit_k}" if exit_k else "")
-            trials[name] = sa.long_short(pred[m], panel["fwd"], k=k, exit_k=exit_k)
+            trials[name] = sa.long_short(pred[m], panel["fwd"], k=k, exit_k=exit_k).window(end=RESEARCH_END)
 dsr = {}
 for label, attr in [("before costs", "gross"), ("after costs", "net")]:
     series = {n: getattr(r, attr) for n, r in trials.items()}
@@ -485,6 +502,12 @@ must clear it, not zero. Read the two columns separately: before costs, is the s
 deflating for 30 tries? After costs, is there anything left to deflate?
 
 *Discuss:* every chart you looked at before choosing counts as a trial, including part 8.
+
+**How fragile are single results?** While preparing this notebook we repaired one bad price in Danaher (2016).
+Rescaling its earlier prices changed its past daily returns by at most 0.00000013, through rounding. That alone
+trained the neural net into a different model and moved the ensemble's **2007** return after costs from about +15%
+to about -3%. The forest and boosting barely moved. Single years, and single random seeds, are noise; that is why
+we count trials.
 """)
 meme("deflated Sharpe, e.g. 'p-hacking'")
 
@@ -501,11 +524,13 @@ Costs are the main enemy. Ideas, roughly from easiest to hardest:
 4. **Sector neutral.** Rank stocks within their sector, so the book is not one big bet on tech against energy.
 5. **New features.** Volume, volatility, or the 52-week high from Workshop 2.
 
-Whatever you try, test it on 2023 onwards **once**, at the end, and count every variant as a trial for part 11.
+Try ideas on 2004 to 2022 only. Then test your final choice on 2023 onwards **once**, at the end, and count every
+variant you tried as a trial for part 11.
 """)
 code('''
 # Example for idea 1: hold names until they leave the top / bottom 30
-banded = sa.long_short(pred["ensemble"], panel["fwd"], k=10, exit_k=30)
+banded_full = sa.long_short(pred["ensemble"], panel["fwd"], k=10, exit_k=30)
+banded = banded_full.window(end=RESEARCH_END)
 display(pd.DataFrame({"daily rebalance": ens.stats(), "hold until outside top 30": banded.stats()}).T
         .style.format("{:.4f}"))
 plots.equity({"daily rebalance": ens.net, "hold until outside top 30": banded.net}, "After costs");
@@ -521,6 +546,27 @@ display(pd.DataFrame({"banded": sa.perf_stats(banded.net), "banded + vol filter"
 md("""
 The filter above is a simplification: going flat on a calm day and back in later costs turnover that this quick
 version does not charge. Fixing that is a good exercise.
+
+### The final test: 2023 to today, once
+
+Everything above was chosen by looking at 2004 to 2022. Now run the choices on data none of them has seen. Run this
+cell once, when you have decided, and report what it says, good or bad.
+""")
+code('''
+FINAL_START = "2023-01-01"
+vol_all = sa.market_volatility(prices).shift(1)
+final = {
+    "paper rule (daily)": full["ensemble"].window(start=FINAL_START).net,
+    "hold until outside top 30": banded_full.window(start=FINAL_START).net,
+}
+final["hold + vol filter"] = final["hold until outside top 30"].where(
+    vol_all.reindex(final["hold until outside top 30"].index) > THRESHOLD, 0.0)
+display(pd.DataFrame({n: sa.perf_stats(r) for n, r in final.items()}).T.round(4))
+plots.equity(final, "Final test, 2023 to today, after costs", log=False);
+''')
+md("""
+*Discuss:* did the improvements chosen on 2004 to 2022 survive? If not, was it the idea, or the threshold we picked
+by looking at part 8?
 """)
 
 # ------------------------------------------------------------------------------------------- 13 live

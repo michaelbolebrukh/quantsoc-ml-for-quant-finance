@@ -34,7 +34,7 @@ directly instead, each meme slot is an empty-looking markdown cell containing `<
 
 ```bash
 python workshop3/fetch_data.py      # prices up to the last close (needs yfinance)
-python workshop3/build_cache.py     # retrain every study period, about 4 minutes
+python workshop3/build_cache.py     # retrain every study period, about 5 minutes
 python -m pytest tests -q
 ```
 

@@ -53,7 +53,7 @@ def importance_compare(mdi: pd.Series, perm: pd.Series, title: str = "What the f
     order = perm.sort_values(ascending=False).index
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
     axes[0].barh(order, mdi.reindex(order), color=QS_GREY)
-    axes[0].set_title("MDI: how often a feature splits (training data)")
+    axes[0].set_title("MDI: impurity removed by its splits (training data)")
     axes[1].barh(order, perm.reindex(order), color=[QS_GREEN if v > 0 else QS_RED for v in perm.reindex(order)])
     axes[1].set_title("Permutation: AUC lost when shuffled (test data)")
     axes[0].invert_yaxis()

@@ -88,6 +88,20 @@ def _read_env_file(path) -> Dict[str, str]:
     return out
 
 
+def _clean_pair(key, secret, source: str) -> Tuple[Optional[str], Optional[str], str]:
+    """Strip stray spaces and line breaks around pasted keys; refuse keys with whitespace INSIDE them.
+
+    A key with a space or newline makes the HTTP library raise an error that quotes the header,
+    i.e. the key itself, so it must never reach the clients. The message never echoes the value.
+    """
+    key, secret = str(key).strip(), str(secret).strip()
+    if not key or not secret:
+        return None, None, "not found"
+    if re.search(r"\s", key) or re.search(r"\s", secret):
+        return None, None, f"{source}, but a key contains a space or line break inside it: paste it again"
+    return key, secret, source
+
+
 def get_credentials(dotenv_paths: Optional[Iterable[Union[str, Path]]] = None) -> Tuple[Optional[str], Optional[str], str]:
     """(key, secret, source) from Colab secrets, then environment variables, then a .env file.
 
@@ -100,12 +114,12 @@ def get_credentials(dotenv_paths: Optional[Iterable[Union[str, Path]]] = None) -
             from google.colab import userdata
             key, secret = userdata.get(CRED_KEYS[0]), userdata.get(CRED_KEYS[1])
             if key and secret:
-                return key, secret, "Colab secrets"
+                return _clean_pair(key, secret, "Colab secrets")
         except Exception:
             pass
     key, secret = os.environ.get(CRED_KEYS[0]), os.environ.get(CRED_KEYS[1])
     if key and secret:
-        return key, secret, "environment variables"
+        return _clean_pair(key, secret, "environment variables")
     paths = [Path(p) for p in (dotenv_paths or [Path.cwd() / ".env"])]
     seen = set()
     for path in paths:
@@ -120,7 +134,7 @@ def get_credentials(dotenv_paths: Optional[Iterable[Union[str, Path]]] = None) -
         vals = dotenv_values(path)
         key, secret = vals.get(CRED_KEYS[0]), vals.get(CRED_KEYS[1])
         if key and secret:
-            return key, secret, f"{path} file"
+            return _clean_pair(key, secret, f"{path} file")
     return None, None, "not found"
 
 
@@ -374,18 +388,25 @@ class AlpacaPaperBroker:
             raise BrokerError(f"Alpaca paper keys are required ({CRED_KEYS[0]} and {CRED_KEYS[1]})")
         self._trading = TradingClient(api_key, secret_key, paper=True)
         self._data = StockHistoricalDataClient(api_key, secret_key)
+        # Error messages from the HTTP layer can quote request headers; remove the keys from any text we show.
+        self.scrub = lambda text: str(text).replace(secret_key, "[secret]").replace(api_key, "[key]")
         self.feed = feed
         self.wait_seconds = float(wait_seconds)
 
     def __repr__(self) -> str:      # never show the clients, which hold the keys
         return f"AlpacaPaperBroker(feed={self.feed!r}, paper=True)"
 
-    @staticmethod
-    def _call(fn, *args):
+    def _call(self, fn, *args):
         try:
             return fn(*args)
         except Exception as e:
-            raise BrokerError(f"Alpaca request failed: {e}") from e
+            raise BrokerError(self.scrub(f"Alpaca request failed: {e}")) from e
+
+    def _guarded(self, fn, *args):
+        try:
+            return fn(*args)
+        except Exception as e:
+            raise BrokerError(self.scrub(e)) from e
 
     def account(self) -> AccountInfo:
         a = self._call(self._trading.get_account)
@@ -410,7 +431,7 @@ class AlpacaPaperBroker:
         return {"is_open": bool(c.is_open), "timestamp": pd.Timestamp(c.timestamp), "next_open": c.next_open}
 
     def daily_bars(self, symbols, lookback_days) -> pd.DataFrame:
-        return fetch_daily_bars(symbols, lookback_days, self._data, feed=self.feed)
+        return self._guarded(fetch_daily_bars, symbols, lookback_days, self._data, self.feed)
 
     def shortable(self, symbol) -> Optional[bool]:
         try:
@@ -427,7 +448,7 @@ class AlpacaPaperBroker:
         try:
             o = self._trading.submit_order(req)
         except Exception as e:
-            raise BrokerError(f"order rejected by Alpaca: {e}") from e
+            raise BrokerError(self.scrub(f"order rejected by Alpaca: {e}")) from e
         deadline = time.time() + self.wait_seconds
         status = str(getattr(o.status, "value", o.status))
         while status not in ("filled", "rejected", "canceled", "expired") and time.time() < deadline:

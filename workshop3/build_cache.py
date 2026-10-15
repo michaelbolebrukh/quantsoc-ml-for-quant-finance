@@ -1,6 +1,6 @@
 """Rebuild the cached walk-forward predictions the notebook loads by default.
 
-Usage:  python workshop3/build_cache.py      # about 4 minutes on a 4-core laptop
+Usage:  python workshop3/build_cache.py      # about 5 minutes on a 4-core laptop
 
 Trains the four "workshop" preset models on every study period (750 days train, 250 days trade)
 and writes their out-of-sample probabilities to workshop3/data/predictions_workshop.csv.gz.

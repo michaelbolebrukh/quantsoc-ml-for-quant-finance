@@ -21,6 +21,27 @@ ISRG JNJ JPM KO LIN LLY LMT LOW MA MCD MDLZ MDT MET META MMM MO MRK MS MSFT NEE 
 PG PLTR PM PYPL QCOM RTX SBUX SCHW SO SPG T TGT TMO TMUS TSLA TXN UBER UNH UNP UPS USB V VZ WFC WMT XOM""".split()
 
 
+# Known errors in Yahoo's adjusted close, repaired by stitching: on the given date the adjusted return
+# is replaced by the raw close return, and every earlier adjusted price is rescaled to match.
+# DHR 2016-07-05 (Fortive spin-off): Yahoo shows +61% adjusted against +3.6% raw.
+REPAIRS = [("DHR", "2016-07-05")]
+
+
+def repair(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for sym, day in REPAIRS:
+        rows = df[df["symbol"] == sym].sort_values("date")
+        dates = pd.to_datetime(rows["date"])
+        i = int((dates == pd.Timestamp(day)).to_numpy().nonzero()[0][0])
+        a, c = rows["adj_close"].to_numpy(), rows["close"].to_numpy()
+        factor = (a[i] / a[i - 1]) / (c[i] / c[i - 1])
+        if abs(factor - 1) < 0.05:          # already fine (Yahoo fixed it): leave alone
+            continue
+        before = rows.index[:i]
+        df.loc[before, "adj_close"] = df.loc[before, "adj_close"] * factor
+    return df
+
+
 def build() -> pd.DataFrame:
     import yfinance as yf
     raw = yf.download(SP100, start=START, auto_adjust=False, progress=False, group_by="ticker", threads=True)
@@ -38,14 +59,18 @@ def build() -> pd.DataFrame:
         rows.append(d[["date", "symbol", "close", "adj_close", "volume"]])
     out = pd.concat(rows, ignore_index=True).sort_values(["date", "symbol"])
     out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
-    return out
+    return repair(out)
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--check", action="store_true")
+    p.add_argument("--repair-only", action="store_true", help="apply REPAIRS to the existing file, no download")
     a = p.parse_args(argv)
-    if not a.check:
+    if a.repair_only:
+        df = repair(pd.read_csv(OUT))
+        df.to_csv(OUT, index=False, compression="gzip", float_format="%.6f")
+    elif not a.check:
         df = build()
         OUT.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(OUT, index=False, compression="gzip", float_format="%.6f")

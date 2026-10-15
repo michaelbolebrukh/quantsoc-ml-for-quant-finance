@@ -149,10 +149,30 @@ def weights_with_borrow(strategy: S.LiveStrategy, scores: pd.Series,
                 bad.append(sym)
         if not bad:
             unknown = sorted(s for s in w[w < 0].index if checked.get(s) is None)
+            # Skipped names stay in the book at weight 0: they were scored (and ranked low), so any
+            # position already held in them is closed rather than left alone.
+            w = pd.concat([w, pd.Series(0.0, index=sorted(skipped))])
             return w, skipped, unknown
         for sym in bad:
-            skipped[sym] = "not shortable or not easy to borrow today"
+            skipped[sym] = "not easy to borrow today, so not shorted (any position held in it is closed)"
         eligible = eligible.drop(index=bad)
+
+
+def drop_today_until_close(bars: pd.DataFrame, clock: dict) -> pd.DataFrame:
+    """Drop any bar dated today (New York) unless it is past 16:00 New York and the market is closed.
+
+    Before the open, Alpaca can return a forming bar for today; deciding on it would use a partial
+    day. After 16:00 with the market closed, today's bar is complete and is kept.
+    """
+    if len(bars) == 0 or clock.get("timestamp") is None:
+        return bars
+    now = pd.Timestamp(clock["timestamp"])
+    now = now.tz_localize(MARKET_TZ) if now.tzinfo is None else now.tz_convert(MARKET_TZ)
+    today = now.tz_localize(None).normalize()
+    finished = (not clock.get("is_open")) and now.hour >= 16
+    if finished:
+        return bars
+    return bars[pd.to_datetime(bars["date"]) < today]
 
 
 def build_live_plan(view: ReadOnlyBroker, strategy: S.LiveStrategy, symbols: Optional[Sequence[str]] = None,
@@ -165,6 +185,7 @@ def build_live_plan(view: ReadOnlyBroker, strategy: S.LiveStrategy, symbols: Opt
     clock = view.clock()
     bars = view.daily_bars([to_alpaca(s) for s in syms], strategy.history_days + EXTRA_DAYS)
     bars = drop_unfinished_day(bars, clock)
+    bars = drop_today_until_close(bars, clock)
     if len(bars) == 0:
         raise BrokerError("no daily bars came back for the strategy's symbols")
     bars = bars.assign(symbol=bars["symbol"].map(from_alpaca), date=pd.to_datetime(bars["date"]))
@@ -252,8 +273,8 @@ def equity_history(broker, period: str = "3M") -> Optional[pd.DataFrame]:
     from alpaca.trading.requests import GetPortfolioHistoryRequest
     try:
         h = client.get_portfolio_history(GetPortfolioHistoryRequest(period=period, timeframe="1D"))
-    except Exception as e:  # the message carries no credential
-        raise BrokerError(f"could not read portfolio history: {e}") from e
+    except Exception as e:
+        raise BrokerError(broker.scrub(f"could not read portfolio history: {e}")) from e
     ts = getattr(h, "timestamp", None) or []
     eq = getattr(h, "equity", None) or []
     if not ts:
@@ -278,7 +299,7 @@ def recent_orders(broker, limit: int = 30) -> pd.DataFrame:
     try:
         orders = client.get_orders(GetOrdersRequest(status=QueryOrderStatus.ALL, limit=limit))
     except Exception as e:
-        raise BrokerError(f"could not read recent orders: {e}") from e
+        raise BrokerError(broker.scrub(f"could not read recent orders: {e}")) from e
     val = lambda x: str(getattr(x, "value", x))
     rows = [{"submitted": pd.Timestamp(o.submitted_at).tz_convert(MARKET_TZ).strftime("%Y-%m-%d %H:%M") if o.submitted_at else "",
              "symbol": from_alpaca(o.symbol), "side": val(o.side), "qty": float(o.qty or 0),
@@ -319,11 +340,19 @@ def submit_plan(broker, plan: LivePlan, confirmed: bool, typed: str,
     if busy:
         raise Refused(f"refused: open orders already exist for {', '.join(busy)}. Wait for them to fill, "
                       "or cancel them on the Alpaca website, then try again")
-    if hasattr(broker, "wait_seconds") and not plan.clock.get("is_open"):
+    closed = not plan.clock.get("is_open")
+    if hasattr(broker, "wait_seconds") and closed:
         broker.wait_seconds = 0.0       # market closed: orders wait for the open, so do not poll for fills
+    crossing = set(plan.orders.loc[plan.orders["symbol"].duplicated(keep=False), "symbol"])
     results: List[OrderResult] = []
     for row in plan.orders.itertuples(index=False):
         coid = client_order_id(plan.decision_date, row.alpaca_symbol, row.action)
+        if closed and row.symbol in crossing and str(row.action).startswith("open"):
+            # Long to short (or back) while closed: the close leg is still pending, so the broker would
+            # reject the opening leg. Send it on the next run, after the close leg has filled.
+            results.append(OrderResult(row.alpaca_symbol, row.side, float(row.qty), "not sent", 0.0, coid,
+                                       "market closed: send this leg after the closing leg fills"))
+            continue
         try:
             res = broker.submit(row.alpaca_symbol, row.side, float(row.qty), coid)
         except BrokerError as e:
