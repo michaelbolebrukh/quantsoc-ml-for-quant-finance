@@ -9,3 +9,4 @@ deck/qa_preview/
 exports/
 *.zip
 .pytest_cache/
+workspace/
