@@ -5,7 +5,7 @@ trees, random forests: Statistical arbitrage on the S&P 500" (European Journal o
 259(2), 689-702; free version at https://www.econstor.eu/handle/10419/130166), on the S&P 100 from 2000 to
 the last close, then takes the strategy to an Alpaca paper-trading account.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/workshop-3/workshop3/workshop3.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop3/workshop3.ipynb)
 
 On a campus network Colab can hit GitHub's rate limit when it opens a notebook from a link. If that happens,
 open the notebook from a Google Drive copy instead (File, Upload notebook, or a shared Drive file).

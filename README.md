@@ -2,7 +2,7 @@
 
 > **Workshop 3 (16 October 2026):** hands-on ML for trading, a replication of Krauss, Do & Huck (2017) with an
 > Alpaca paper-trading dashboard. See [`workshop3/README.md`](workshop3/README.md) or
-> [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/workshop-3/workshop3/workshop3.ipynb).
+> [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop3/workshop3.ipynb).
 
 A hands-on workshop of about 70 minutes, with an optional 25-minute bonus section on learning theory, by the **Quantitative Finance Society** ([quant-soc.com](https://quant-soc.com)).
 You build a small machine learning strategy on twenty years of real daily prices for 40 large US companies:

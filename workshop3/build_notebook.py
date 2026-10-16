@@ -68,7 +68,7 @@ computer. The second loads the code.
 """)
 code('''
 # @title Setup (run once; safe to run again)
-OWNER, REPO, REVISION = "michaelbolebrukh", "quantsoc-ml-for-quant-finance", "workshop-3"
+OWNER, REPO, REVISION = "michaelbolebrukh", "quantsoc-ml-for-quant-finance", "main"
 
 import io, shutil, sys, urllib.request, zipfile
 from pathlib import Path
