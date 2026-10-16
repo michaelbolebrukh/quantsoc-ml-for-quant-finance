@@ -2,7 +2,6 @@
 
 Usage:  python workshop3/build_notebook.py
 Edit the text here rather than in the notebook, so the two never drift apart.
-Meme slots are invisible HTML comments: replace one with ![](link-to-image) to show a meme there.
 """
 from pathlib import Path
 
@@ -19,10 +18,6 @@ def md(text):
 
 def code(text):
     CELLS.append(nbf.v4.new_code_cell(text.strip("\n")))
-
-
-def meme(where):
-    md(f"<!-- MEME SLOT: {where}. Replace this comment with ![](https://...) to show an image. -->")
 
 
 # ------------------------------------------------------------------------------------------- intro
@@ -62,7 +57,6 @@ account. No slides: we walk through this notebook together. Run each cell when w
 > two share classes). One known Yahoo error (Danaher's 2016 spin-off) is repaired in `fetch_data.py`.
 > Teaching only, not investment advice.
 """)
-meme("title, e.g. 'stonks'")
 
 # ------------------------------------------------------------------------------------------- setup
 md("""
@@ -160,7 +154,6 @@ stayed positive. The paper itself says the edge decays.
 
 *Discuss:* why a target of "beats the median" rather than "goes up"? What happens to market crashes?
 """)
-meme("paper section, e.g. 'reading the abstract vs reading the results table'")
 
 # ------------------------------------------------------------------------------------------- 2 data
 md("""
@@ -243,7 +236,6 @@ md("""
 forest add? Possible answers: combining many lags at once, non-linear effects, interactions such as "big drop
 **and** a long uptrend".
 """)
-meme("signal research, e.g. 'buy high sell low' / mean reversion")
 
 # ------------------------------------------------------------------------------------------- 5 walk forward
 md("""
@@ -320,7 +312,6 @@ plots.bar(sa.decile_returns(oos["ensemble"], oos["fwd"]),
           "Next-day return by decile of the ensemble's probability (10 = most likely to beat the median)",
           "next-day return vs the day's average", pct=True);
 ''')
-meme("model evaluation, e.g. '51% accuracy' reactions")
 
 # ------------------------------------------------------------------------------------------- 7 backtest
 md("""
@@ -361,7 +352,6 @@ October 2015 (and far more than that in the 1990s). Ours is far smaller.
 Name three reasons. (Universe: 100 mega-caps are the most efficiently priced stocks in the world; period: the
 anomaly was published and traded away; model size: ours are smaller.)
 """)
-meme("backtest, e.g. 'before costs vs after costs'")
 
 # ------------------------------------------------------------------------------------------- 8 regimes
 md("""
@@ -425,7 +415,6 @@ md("""
 signal? Which features have high MDI but zero or negative permutation importance? Those are what the forest
 **fitted** in training but which do not **help** out of sample.
 """)
-meme("feature importance")
 
 # ------------------------------------------------------------------------------------------- 10 CV
 md("""
@@ -467,7 +456,6 @@ reports an AUC well above 0.5 while both date-based versions sit near 0.5: the "
 near-copies of its training rows. Most of the leak here comes from shuffling; purging and the embargo remove what
 is left at the block edges, which matters more with fewer, longer folds or longer labels.
 """)
-meme("cross-validation, e.g. 'data leakage'")
 
 # ------------------------------------------------------------------------------------------- 11 DSR
 md("""
@@ -509,7 +497,6 @@ trained the neural net into a different model and moved the ensemble's **2007** 
 to about -3%. The forest and boosting barely moved. Single years, and single random seeds, are noise; that is why
 we count trials.
 """)
-meme("deflated Sharpe, e.g. 'p-hacking'")
 
 # ------------------------------------------------------------------------------------------- 12 improve
 md("""
@@ -621,7 +608,6 @@ same offline demo as the cell above. Details: `workshop3/README.md`.
 To run it yourself after the workshop: make a free account at [alpaca.markets](https://alpaca.markets), switch to
 Paper Trading, create API keys, and put them in `.env`. Never paste keys into a notebook.
 """)
-meme("going live, e.g. 'deploying to prod on a Friday'")
 md("""
 ## Recap
 
