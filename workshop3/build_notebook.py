@@ -43,6 +43,7 @@ account. No slides: we walk through this notebook together. Run each cell when w
 | 3 | Features and target, exactly as in the paper |
 | 4 | Signal research before any ML |
 | 5 | Walk-forward training, one study period live |
+| 5b | Inside the three models: how each works, and how they are combined |
 | 6 | Did the models learn anything? |
 | 7 | The backtest, before and after costs |
 | 8 | When does it work? Regimes |
@@ -284,6 +285,154 @@ else:
 print(f"{len(pred):,} out-of-sample predictions, models: {[c for c in pred.columns if c != 'period']}")
 ''')
 
+# ------------------------------------------------------------------------------------------- 5b models
+md("""
+## 5b. Inside the three models
+
+All three models answer the same question. One **row** is one stock on one day: the inputs are its 31 past
+returns, the label is 1 if it beat the median stock the next day. Each study period trains on 750 days of about
+100 stocks, roughly 75,000 rows. Every model outputs a probability, P(beats the median tomorrow), and only the
+**ranking** of that probability across stocks matters: the top 10 are bought, the bottom 10 sold short.
+""")
+code('''
+plots.pipeline_diagram();
+''')
+md("""
+We already trained the forest on period 19. Train the other two on the same rows so we can look inside all three
+(a few seconds).
+""")
+code('''
+from sklearn.metrics import roc_auc_score
+t0 = time.time()
+_, more = sa.fit_predict_period(panel, p, ["boosting", "mlp"])
+fitted.update(more)
+dates = panel.index.get_level_values("date")
+train_rows = panel[(dates >= p.train_start) & (dates <= p.train_end)].dropna(subset=["y"])
+trade_rows = panel[(dates >= p.trade_start) & (dates <= p.trade_end)].dropna(subset=["y"])
+print(f"trained boosting and the neural net in {time.time() - t0:.0f}s on {len(train_rows):,} rows")
+''')
+md("""
+### Random forest: many independent trees, averaged
+
+A **decision tree** asks a chain of yes/no questions, such as "was yesterday's return below 1%?". At each step it
+picks the feature and the threshold that best separate the rows that beat the median from those that did not
+(measured by Gini impurity). A leaf predicts the share of 1s among the training rows that end up there.
+
+One deep tree memorises noise. A **forest** grows 150 trees and makes them deliberately different: each one sees a
+random 30% sample of the rows (drawn with replacement), and at every split may only choose among 5 random features out of 31. Their mistakes
+differ, so averaging cancels much of the noise: it lowers variance without adding bias. Ours is limited to depth 10
+with at least 100 rows per leaf; the paper used 1,000 trees of depth 20.
+
+Below are the first three levels of the forest's **first** tree. `value` is [share that lost to the median, share
+that beat it] among the rows reaching that box.
+""")
+code('''
+from sklearn.tree import plot_tree
+
+forest = fitted["forest"]
+fig, ax = plt.subplots(figsize=(14, 5.5)); ax.grid(False)
+plot_tree(forest.estimators_[0], max_depth=2, feature_names=sa.FEATURES, class_names=["loses", "beats"],
+          filled=True, impurity=False, proportion=True, rounded=True, fontsize=9, ax=ax)
+ax.set_title("The top of one tree (it continues to depth 10)");
+''')
+md("""
+Notice how little each split separates: shares like 0.49 against 0.51. That is what a weak signal looks like
+from inside a model. Now ask all 150 trees about the same stock on the same day:
+""")
+code('''
+one = trade_rows.iloc[[123]]
+votes = np.array([tree.predict_proba(one[sa.FEATURES].to_numpy())[0, 1] for tree in forest.estimators_])
+fig, ax = plt.subplots(figsize=(10, 3.4))
+ax.hist(votes, bins=30, color=plots.QS_GREY)
+ax.axvline(votes.mean(), color=plots.QS_GOLD, lw=3, label=f"forest = their average = {votes.mean():.3f}")
+ax.set_title(f"150 trees' answers for {one.index[0][1]} on {one.index[0][0].date()}")
+ax.set_xlabel("P(beats the median)"); ax.legend();
+''')
+md("""
+Individual trees disagree widely; the average is far steadier than any one of them.
+
+### Gradient boosting: small trees in sequence, each fixing the last
+
+Boosting starts from a flat guess (the share of 1s) and adds trees **one at a time**. Each new tree is small
+(depth 3, at most 8 leaves) and is fitted to the current model's errors, technically the gradient of the log-loss.
+Its correction is shrunk to 10% (the learning rate) before it is added, so no single tree dominates. After 100
+rounds the summed scores are turned into a probability with the sigmoid function.
+
+The forest averages many strong, independent trees, which mainly reduces **variance**. Boosting adds up many weak
+ones, which mainly reduces **bias**, and the risk runs the other way: keep adding trees and it fits noise.
+Tree count, depth, learning rate and features per split (15 of 31) match the paper. Watch it learn, round by round:
+""")
+code('''
+boost = fitted["boosting"]
+Xtr, ytr = train_rows[sa.FEATURES].to_numpy(), train_rows["y"].astype(int)
+Xte, yte = trade_rows[sa.FEATURES].to_numpy(), trade_rows["y"].astype(int)
+auc_train = [roc_auc_score(ytr, pr[:, 1]) for pr in boost.staged_predict_proba(Xtr)]
+auc_trade = [roc_auc_score(yte, pr[:, 1]) for pr in boost.staged_predict_proba(Xte)]
+fig, ax = plt.subplots(figsize=(10, 3.6))
+ax.plot(range(1, len(auc_train) + 1), auc_train, color=plots.QS_NAVY, label="training rows (750 days)")
+ax.plot(range(1, len(auc_trade) + 1), auc_trade, color=plots.QS_GOLD, label="the 250 trading days after")
+ax.axhline(0.5, color="black", lw=0.8)
+ax.set_xlabel("boosting round (trees so far)"); ax.set_ylabel("AUC"); ax.legend()
+ax.set_title("Boosting, round by round: the training score keeps climbing, the out-of-sample score does not");
+''')
+md("""
+*Discuss:* the gap between the two lines is overfitting, live. Every round makes the training fit better, but
+almost none of that carries over to the next year. Stopping earlier would hardly change the out-of-sample score:
+most of what boosting learns here is noise.
+
+### The neural network
+
+The 31 features are first standardised (mean 0, standard deviation 1, using the training rows only). Each neuron
+takes a weighted sum of the layer before and passes it through **ReLU** (negative values become 0). Training uses
+the Adam optimiser to minimise the log-loss, with a small penalty on large weights. It holds out 10% of the
+training rows and stops when the score on them stops improving.
+
+The paper's network has the same shape but used maxout neurons, dropout, an L1 penalty, the ADADELTA optimiser and
+400 passes; ours is a simpler approximation.
+""")
+code('''
+plots.mlp_diagram();
+net = fitted["mlp"][-1]                          # the network inside the pipeline (after the scaler)
+fig, ax = plt.subplots(1, 2, figsize=(12, 3.4))
+ax[0].plot(net.loss_curve_, color=plots.QS_NAVY); ax[0].set_title("Training loss per pass"); ax[0].set_xlabel("pass")
+ax[1].plot(net.validation_scores_, color=plots.QS_GOLD); ax[1].set_title("Accuracy on the held-out 10% of training rows")
+ax[1].set_xlabel("pass")
+fig.suptitle(f"The network stopped after {net.n_iter_} passes, when the held-out score stopped improving")
+fig.tight_layout();
+''')
+md("""
+Two weaknesses worth knowing:
+
+* **It is fragile.** Part 11 shows that a rounding-sized change (about 0.0000001) in one stock's past returns gave a
+  noticeably different network and moved a whole year's result. The trees barely moved.
+* **Its held-out 10% is a random sample of rows**, exactly the shuffled split part 10 warns about. It does not leak
+  into our out-of-sample test, but it makes the stopping decision noisy and optimistic.
+
+### The ensemble: a plain average
+
+`ensemble = (forest + boosting + mlp) / 3` for every stock on every day, exactly as in the paper. Averaging helps
+when models make **different** mistakes. Do ours?
+""")
+code('''
+upto = pred[pred.index.get_level_values("date") <= RESEARCH_END]
+three = ["forest", "boosting", "mlp"]
+daily_ranks = upto[three + ["ensemble"]].groupby(level="date").rank()
+rank_corr = daily_ranks.groupby(level="date").corr().groupby(level=1).mean()
+spread = upto[three].groupby(level="date").std().mean()
+plots.agreement_figure(rank_corr.loc[three, three], spread)
+display(rank_corr["ensemble"].drop("ensemble").rename("ensemble's ranking vs each model").to_frame().round(3))
+''')
+md("""
+**How to read this.** The two tree models rank stocks quite similarly; the neural net ranks them differently,
+so it does bring something of its own. But look at the right-hand chart: the net's probabilities spread out more
+widely than the trees' do. In an average of probabilities, the model with the widest spread has the most say in which
+stocks end up in the top and bottom 10, so the ensemble's ranking sits closest to the neural net's: the most fragile
+of the three.
+
+*Discuss:* how would you stop one model dominating? One answer, idea 6 in part 12: average each model's daily
+**ranks** instead of its probabilities.
+""")
+
 # ------------------------------------------------------------------------------------------- 6 evaluation
 md("""
 ## 6. Did the models learn anything?
@@ -435,7 +584,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 H = 20
 y20 = rs.forward_median_target(prices, H).stack(future_stack=True).rename("y20")
 y20.index.names = ["date", "symbol"]
-cv_data = panel.loc["2010":"2019", sa.FEATURES].join(y20).dropna()
+cv_data = panel.loc["2010-01-01":"2019-12-31", sa.FEATURES].join(y20).dropna()
 cv_data = cv_data[cv_data.index.get_level_values("date").isin(cv_data.index.get_level_values("date").unique()[::2])]
 X, y = cv_data[sa.FEATURES].to_numpy(), cv_data["y20"].to_numpy().astype(int)
 make = lambda: HistGradientBoostingClassifier(max_iter=100, max_depth=3, learning_rate=0.1, random_state=0)
@@ -510,6 +659,8 @@ Costs are the main enemy. Ideas, roughly from easiest to hardest:
 3. **More stocks.** Reversal is stronger in smaller, less liquid stocks, but costs are higher there too.
 4. **Sector neutral.** Rank stocks within their sector, so the book is not one big bet on tech against energy.
 5. **New features.** Volume, volatility, or the 52-week high from Workshop 2.
+6. **A fairer ensemble.** Average each model's daily ranks instead of its probabilities (part 5b), so no single
+   model dominates the ranking.
 
 Try ideas on 2004 to 2022 only. Then test your final choice on 2023 onwards **once**, at the end, and count every
 variant you tried as a trial for part 11.
