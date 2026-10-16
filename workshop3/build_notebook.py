@@ -78,10 +78,7 @@ FILES = ["quantsoc_ml", "workshop3", "requirements.txt", ".env.example"]
 
 
 def fetch(root: Path):
-    marker, wanted = root / ".release", f"{OWNER}/{REPO}@{REVISION}"
-    if marker.exists() and marker.read_text().strip() == wanted:
-        print("Workshop files are already here.")
-        return
+    """Download the branch every time: a branch moves, so files from an earlier run may be out of date."""
     url = f"https://github.com/{OWNER}/{REPO}/archive/{REVISION}.zip"
     print("Downloading", url)
     with zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(url, timeout=120).read())) as zf:
@@ -97,7 +94,6 @@ def fetch(root: Path):
             shutil.copytree(s, d)
         elif s.exists():
             shutil.copy(s, d)
-    marker.write_text(wanted)
     print("Done.")
 
 
@@ -117,7 +113,9 @@ print("Workshop folder:", ROOT)
 ''')
 code('''
 %matplotlib inline
-import time, warnings
+import sys, time, warnings
+for name in [m for m in sys.modules if m.split(".")[0] in ("quantsoc_ml", "live")]:
+    del sys.modules[name]                       # re-running this cell picks up freshly downloaded code
 warnings.filterwarnings("ignore", category=FutureWarning)
 import numpy as np
 import pandas as pd
