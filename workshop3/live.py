@@ -310,10 +310,10 @@ def recent_orders(broker, limit: int = 30) -> pd.DataFrame:
 
 # --------------------------------------------------------------------------- submit
 
-def client_order_id(decision_date, alpaca_symbol: str, action: str) -> str:
+def client_order_id(decision_date, alpaca_symbol: str, action: str, prefix: str = CLIENT_ID_PREFIX) -> str:
     """One id per decision date, symbol and leg. Alpaca refuses a reused id, so a double click cannot duplicate."""
     leg = str(action).replace(" ", "-")
-    return f"{CLIENT_ID_PREFIX}-{pd.Timestamp(decision_date):%Y%m%d}-{alpaca_symbol}-{leg}"
+    return f"{prefix}-{pd.Timestamp(decision_date):%Y%m%d}-{alpaca_symbol}-{leg}"
 
 
 def submit_plan(broker, plan: LivePlan, confirmed: bool, typed: str,
@@ -346,7 +346,8 @@ def submit_plan(broker, plan: LivePlan, confirmed: bool, typed: str,
     crossing = set(plan.orders.loc[plan.orders["symbol"].duplicated(keep=False), "symbol"])
     results: List[OrderResult] = []
     for row in plan.orders.itertuples(index=False):
-        coid = client_order_id(plan.decision_date, row.alpaca_symbol, row.action)
+        coid = client_order_id(plan.decision_date, row.alpaca_symbol, row.action,
+                               getattr(plan, "order_id_prefix", CLIENT_ID_PREFIX))   # each workshop's own ids
         if closed and row.symbol in crossing and str(row.action).startswith("open"):
             # Long to short (or back) while closed: the close leg is still pending, so the broker would
             # reject the opening leg. Send it on the next run, after the close leg has filled.

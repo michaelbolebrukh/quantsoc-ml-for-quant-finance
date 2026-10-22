@@ -1,0 +1,103 @@
+symbol,yahoo_sector,etf
+AAPL,Technology,XLK
+ABBV,Healthcare,XLV
+ABT,Healthcare,XLV
+ACN,Technology,XLK
+ADBE,Technology,XLK
+AIG,Financial Services,XLF
+AMD,Technology,XLK
+AMGN,Healthcare,XLV
+AMT,Real Estate,XLRE
+AMZN,Consumer Cyclical,XLY
+AVGO,Technology,XLK
+AXP,Financial Services,XLF
+BA,Industrials,XLI
+BAC,Financial Services,XLF
+BKNG,Consumer Cyclical,XLY
+BLK,Financial Services,XLF
+BMY,Healthcare,XLV
+BRK-B,Financial Services,XLF
+C,Financial Services,XLF
+CAT,Industrials,XLI
+CHTR,Communication Services,XLC
+CL,Consumer Defensive,XLP
+CMCSA,Communication Services,XLC
+COF,Financial Services,XLF
+COP,Energy,XLE
+COST,Consumer Defensive,XLP
+CRM,Technology,XLK
+CSCO,Technology,XLK
+CVS,Healthcare,XLV
+CVX,Energy,XLE
+DE,Industrials,XLI
+DHR,Healthcare,XLV
+DIS,Communication Services,XLC
+DUK,Utilities,XLU
+EMR,Industrials,XLI
+F,Consumer Cyclical,XLY
+FDX,Industrials,XLI
+GD,Industrials,XLI
+GE,Industrials,XLI
+GILD,Healthcare,XLV
+GM,Consumer Cyclical,XLY
+GOOG,Communication Services,XLC
+GOOGL,Communication Services,XLC
+GS,Financial Services,XLF
+HD,Consumer Cyclical,XLY
+HON,Industrials,XLI
+IBM,Technology,XLK
+INTC,Technology,XLK
+INTU,Technology,XLK
+ISRG,Healthcare,XLV
+JNJ,Healthcare,XLV
+JPM,Financial Services,XLF
+KO,Consumer Defensive,XLP
+LIN,Basic Materials,XLB
+LLY,Healthcare,XLV
+LMT,Industrials,XLI
+LOW,Consumer Cyclical,XLY
+MA,Financial Services,XLF
+MCD,Consumer Cyclical,XLY
+MDLZ,Consumer Defensive,XLP
+MDT,Healthcare,XLV
+MET,Financial Services,XLF
+META,Communication Services,XLC
+MMM,Industrials,XLI
+MO,Consumer Defensive,XLP
+MRK,Healthcare,XLV
+MS,Financial Services,XLF
+MSFT,Technology,XLK
+NEE,Utilities,XLU
+NFLX,Communication Services,XLC
+NKE,Consumer Cyclical,XLY
+NOW,Technology,XLK
+NVDA,Technology,XLK
+ORCL,Technology,XLK
+PEP,Consumer Defensive,XLP
+PFE,Healthcare,XLV
+PG,Consumer Defensive,XLP
+PLTR,Technology,XLK
+PM,Consumer Defensive,XLP
+PYPL,Financial Services,XLF
+QCOM,Technology,XLK
+RTX,Industrials,XLI
+SBUX,Consumer Cyclical,XLY
+SCHW,Financial Services,XLF
+SO,Utilities,XLU
+SPG,Real Estate,XLRE
+T,Communication Services,XLC
+TGT,Consumer Defensive,XLP
+TMO,Healthcare,XLV
+TMUS,Communication Services,XLC
+TSLA,Consumer Cyclical,XLY
+TXN,Technology,XLK
+UBER,Technology,XLK
+UNH,Healthcare,XLV
+UNP,Industrials,XLI
+UPS,Industrials,XLI
+USB,Financial Services,XLF
+V,Financial Services,XLF
+VZ,Communication Services,XLC
+WFC,Financial Services,XLF
+WMT,Consumer Defensive,XLP
+XOM,Energy,XLE

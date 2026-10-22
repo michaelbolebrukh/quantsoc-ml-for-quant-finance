@@ -78,6 +78,17 @@ api_key, api_secret, key_source = get_credentials(dotenv_paths=[ROOT / ".env", P
 have_keys = bool(api_key and api_secret)
 
 
+def same_account(a, b) -> bool:
+    """True when two plans saw the same positions (share counts to 6 dp) and the same open orders.
+
+    Equity may differ between the page and the click (it moves all day); positions and open orders
+    may not, or the orders on screen were drawn for a different account.
+    """
+    def rounded(p):
+        return {str(k): round(float(v), 6) for k, v in p.items() if round(float(v), 6) != 0}
+    return rounded(a.positions) == rounded(b.positions) and sorted(a.open_orders) == sorted(b.open_orders)
+
+
 def safe(err) -> str:
     """Error text with the keys removed, in case a library quoted a request header."""
     text = str(err)
@@ -118,6 +129,13 @@ else:
         st.error("No Alpaca keys found. Copy `.env.example` to `.env` in the repo root, paste your PAPER keys "
                  "after `APCA_API_KEY_ID=` and `APCA_API_SECRET_KEY=`, then reload this page.")
         st.stop()
+
+st.warning("**One strategy per paper account.** This page moves the account's stock positions to its own book: "
+           "every S&P 100 stock it scores but does not pick is sold, or bought back, to zero. If the same paper "
+           "account also runs Workshop 4's dashboard, this page would close Workshop 4's stock trades and leave its "
+           "ETF hedges on their own. Use a separate paper account for each strategy. To start again from nothing, "
+           "close all positions on the Alpaca website (Paper Trading, Positions, Close all), wait for the orders to "
+           "fill, then reload this page.")
 
 # ---- strategy
 strategy_path = resolve(strategy_text)
@@ -247,6 +265,9 @@ if mode == ALPACA and getattr(broker, "paper", False) is True:
         try:
             if shown_plan is None or shown_plan.decision_date != plan.decision_date:
                 raise Refused("refused: the page changed before the click; look at the orders again, then submit")
+            if not same_account(shown_plan, plan):
+                raise Refused("refused: the account changed since the page was drawn (positions or open orders are "
+                              "different now), so these orders may be wrong. Look at the new orders, then submit")
             results = live.submit_plan(broker, shown_plan, confirmed=ok, typed=typed)
             sent_dates.append(f"{plan.decision_date:%Y-%m-%d}")
             st.session_state["last_results"] = live.results_table(results)

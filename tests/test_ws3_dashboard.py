@@ -385,3 +385,28 @@ def test_app_submits_the_plan_on_screen_even_if_equity_moved(saved, broker_bars,
     assert len(sent) == 1
     assert [(s["symbol"], s["qty"]) for s in sent[0].submissions] == \
         [(r.alpaca_symbol, float(r.qty)) for r in shown.orders.itertuples()]
+
+
+# --------------------------------------------------------------------------- regressions from the Workshop 4 falsification pass
+
+def test_app_warns_one_strategy_per_account(saved, monkeypatch):
+    monkeypatch.delenv("APCA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
+    at = _app(saved, "Offline demo").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("One strategy per paper account" in w.value and "Workshop 4" in w.value for w in at.warning)
+
+
+def test_app_refuses_when_the_account_changed_after_the_page_was_drawn(saved, broker_bars, monkeypatch):
+    monkeypatch.setenv("APCA_API_KEY_ID", FAKE_KEY)
+    monkeypatch.setenv("APCA_API_SECRET_KEY", FAKE_SECRET)
+    acct = FakeAlpaca(bars=broker_bars, cash=100_000.0)            # one account shared by every rerun
+    monkeypatch.setattr(live, "connect_alpaca", lambda key, secret: acct)
+    at = _app(saved, "Alpaca paper").run()
+    at.checkbox(key="confirm_box").check().run()
+    at.text_input(key="confirm_text").input("SUBMIT").run()
+    acct.holdings = {"AAPL": 5.0}                                   # traded elsewhere after the page was drawn
+    [b for b in at.button if b.key == "submit"][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert acct.submissions == []
+    assert any("account changed" in e.value for e in at.error)
