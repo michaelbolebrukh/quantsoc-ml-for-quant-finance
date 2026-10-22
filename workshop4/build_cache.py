@@ -1,6 +1,6 @@
 """Rebuild the cached backtests the Workshop 4 notebook loads by default.
 
-Usage:  python workshop4/build_cache.py      # about 4 minutes on a 4-core laptop
+Usage:  python workshop4/build_cache.py      # about 3 minutes on a 4-core laptop
 
 Runs the four variants (sector ETFs, ETFs in trading time, PCA at 55% of variance, PCA with 15
 factors) from 2001 to the last date of the snapshot and writes their daily returns and trade logs
@@ -17,7 +17,7 @@ import pandas as pd  # noqa: E402
 
 from quantsoc_ml import avlee as al  # noqa: E402
 
-START = "2001-01-01"
+START = "2001-01-03"   # the first day every version (PCA needs 252 days of history) can trade
 DAILY = ROOT / "workshop4" / "data" / "backtests_daily.csv.gz"
 TRADES = ROOT / "workshop4" / "data" / "backtests_trades.csv.gz"
 VARIANTS = {

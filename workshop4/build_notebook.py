@@ -252,8 +252,8 @@ print(f"{block.shape[1]} stocks with a full year of history; {m} factors explain
 plots.spectrum(vals, n_days=len(block), title=f"Eigenvalues of the correlation matrix, one year to {DAY.date()}");
 ''')
 md("""
-The first eigenvalue is the **market**: every stock moves with it. A handful more stand above the noise line. Which
-stocks load on the next two? Colour by sector:
+The first eigenvalue is the **market**: every stock moves with it. Only two more stand above the noise line. Which
+stocks load on them? Colour by sector:
 """)
 code('''
 weights = pd.DataFrame(Q * block.std().to_numpy()[:, None], index=block.columns)     # back to eigenvector weights
@@ -262,8 +262,9 @@ plots.eigenvector_bars(weights[2], sectors, "Eigenvector 3");
 ''')
 md("""
 Nobody told PCA what a sector is, yet eigenvector 2 puts defensive stocks (utilities, staples) at one end and
-cyclicals (industrials, energy) at the other. The paper calls this **coherence**: eigenportfolios behave like
-long-short bets between industries.
+cyclicals (industrials, energy) at the other. The paper calls this **coherence**: sort the stocks by their weight in
+an eigenvector and neighbours tend to share an industry, so eigenportfolios behave like long-short bets between
+industries.
 
 How many factors does 55% take over time? The paper found fewer in crises (Fig. 20): when everything falls together,
 one factor explains most of it.
@@ -295,7 +296,7 @@ most, and a stock's true peers are not always its official sector.
 md("""
 ## 6. From residuals to an s-score, step by step
 
-The paper's appendix, for JPMorgan against XLF on one date. All of it uses the last 60 trading days only.
+The paper's appendix procedure, applied to JPMorgan against XLF on one date. All of it uses the last 60 trading days only.
 """)
 code('''
 DAY = pd.Timestamp("2007-03-01")                   # <- try other dates
@@ -389,7 +390,7 @@ the stock plus its hedge. Four versions:
 * **pca_55**: as many eigenportfolios as explain 55% of the variance (sec. 5.4)
 * **pca_15**: a fixed 15 eigenportfolios (sec. 5.3)
 
-The full run takes about 4 minutes, so we load results made by the same code (`workshop4/build_cache.py`) and
+The full run takes about 3 minutes, so we load results made by the same code (`workshop4/build_cache.py`) and
 re-run one year live to check them.
 """)
 code('''
@@ -434,7 +435,7 @@ by = pd.DataFrame({name: {k: perf_stats(v.net.loc[a:b])["Sharpe"] for k, v in re
 display(by.round(2).style.set_caption("Sharpe ratio after costs, by period"))
 ''')
 md("""
-The paper's pattern again, sharper: excellent in 2001 to 2002, then negative after costs from 2003 to 2007 for
+The paper's pattern again, sharper: strong in 2001 to 2002, then negative after costs from 2003 to 2007 for
 every version except trading time. *Discuss:* why would a published, simple, profitable strategy stop working?
 Who else was running it by 2003?
 """)
@@ -442,7 +443,8 @@ md("""
 **August 2007, the "quant quake"** (paper sec. 7). Many funds ran similar mean-reversion books; when some had to
 sell quickly, the crowded trades all moved against everyone at once. The paper found a sudden drawdown in early
 August followed by a recovery in about ten days, smaller for PCA (5%) than for ETF strategies (10%) at their 2+2
-leverage. Ours:
+leverage (Khandani and Lo, 2007, first reproduced this drawdown with simpler contrarian strategies). Ours, with
+about 34 trades open at 5% each, roughly 0.85+0.85 in stocks: under half the paper's leverage.
 """)
 code('''
 fig, ax = plt.subplots(figsize=(11, 3.6))
@@ -452,6 +454,10 @@ for k, v in cached.items():
 ax.axvspan(pd.Timestamp("2007-08-06"), pd.Timestamp("2007-08-10"), color=plots3.QS_RED, alpha=0.1, label="6 to 10 August")
 ax.set_title("Cumulative return, mid-July to mid-September 2007"); ax.legend(fontsize=8);
 ''')
+md("""
+Our drawdowns are small, and here PCA was not the more resilient version. *Discuss:* why might a book of 100
+mega-caps be hit less by a fund unwinding than the paper's 1,000-stock book?
+""")
 
 # ------------------------------------------------------------------------------------------- 10 vs ML
 md("""
@@ -465,7 +471,10 @@ from quantsoc_ml import statarb as sa
 ml_pred = sa.load_cached_predictions()
 ml_panel = sa.make_panel(sa.wide(sa.load_prices()))
 ml = sa.long_short(ml_pred["ensemble"], ml_panel["fwd"], k=10).window(end=RESEARCH_END)
-both = pd.DataFrame({"Workshop 3 ML (after costs)": ml.net, "Avellaneda-Lee ETF (after costs)": research["etf"].net}).dropna()
+# Workshop 3 labels each return by the day the signal was made; here a return is labelled by the day it is
+# earned (the next trading day). Shift Workshop 3's series by one day so the two line up.
+ml_net = ml.net.set_axis(R.index[R.index.get_indexer(ml.net.index) + 1]).loc[:RESEARCH_END]
+both = pd.DataFrame({"Workshop 3 ML (after costs)": ml_net, "Avellaneda-Lee ETF (after costs)": research["etf"].net}).dropna()
 display(pd.DataFrame({c: perf_stats(both[c]) for c in both}).T.round(3))
 print(f"correlation of their daily returns: {both.corr().iloc[0, 1]:.2f}")
 blend = both.mean(axis=1)
@@ -473,7 +482,9 @@ print(f"a 50/50 blend: Sharpe {perf_stats(blend)['Sharpe']:.2f}")
 ''')
 md("""
 *Discuss:* two strategies built on the same idea (reversal) by very different routes. Is their correlation high or
-low? Before costs, both work; after costs, which survives, and why? Hint: compare their daily turnover.
+low? Before costs, both work. After costs, the ML strategy loses heavily and the ETF version only breaks even over
+these dates (they start in December 2003, after its best years). Why the difference? Hint: compare their daily
+turnover.
 """)
 
 # ------------------------------------------------------------------------------------------- 11 meta
@@ -491,7 +502,7 @@ code('''
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import roc_auc_score
 
-trades = cached["etf"].trades.dropna(subset=["kappa"]).copy()
+trades = research["etf"].trades.dropna(subset=["kappa"]).copy()    # trades opened and closed by the end of 2022
 trades["abs_s"] = trades["s_entry"].abs()
 trades["tau"] = 252 / trades["kappa"]
 trades["vol_at_entry"] = mkt_vol.reindex(trades["entry"]).to_numpy()
@@ -540,15 +551,16 @@ partly inside our sample. *Discuss:* how many trials did the paper's authors eff
 md("""
 ## 13. Your turn
 
-Ideas, roughly from easiest to hardest. Each one is a `Config` change; a run over 2001 to 2022 takes about a
+Ideas, roughly from easiest to hardest. Each one is a `Config` change; a run over 2001 to 2022 takes under a
 minute.
 
 1. **Thresholds.** Try `s_open=1.5` or `2.0`: fewer, stronger trades and lower costs.
 2. **Window.** `window=90`: steadier estimates, slower signals.
 3. **Hedge at entry.** `rehedge="entry"` keeps each trade's opening hedge instead of re-hedging daily. (We measured
    it before the workshop: it barely changes turnover. The cost is the trading itself.)
-4. **The drift term.** The paper's modified s-score (sec. 4.2) subtracts $\\alpha / (\\kappa\\, \\sigma_{eq})$;
-   `fit.alpha` holds $\\alpha$ per day. Does it help?
+4. **The drift term.** The paper's modified s-score (sec. 4.2) subtracts $\\alpha / (\\kappa\\, \\sigma_{eq})$, with
+   $\\alpha$ and $\\kappa$ in the same time units. `fit.alpha` is per day and `fit.kappa` per year, so use
+   `252 * fit.alpha / (fit.kappa * fit.sigma_eq)`. Does it help?
 5. **Meta-label filter.** Only take trades the classifier in part 11 likes.
 
 Test your final choice on 2023 onwards **once**.
@@ -556,7 +568,7 @@ Test your final choice on 2023 onwards **once**.
 code('''
 my_cfg = al.Config(factors="etf", s_open=1.5)                       # <- change this
 t0 = time.time()
-mine = al.run(prices, my_cfg, etfs, sectors, start="2001-01-01", end=RESEARCH_END)
+mine = al.run(prices, my_cfg, etfs, sectors, start=research["etf"].net.index[0], end=RESEARCH_END)
 print(f"{time.time() - t0:.0f}s")
 display(pd.DataFrame({"paper's settings": research["etf"].stats(), "yours": mine.stats()}).T.round(3))
 ''')

@@ -90,7 +90,7 @@ with st.sidebar:
     cfg = live.live_config()
     st.caption(f"Strategy settings (the paper's): {cfg.window}-day window, sector ETF factors, open beyond "
                f"s = ±{cfg.s_open:g}, close a short below {cfg.s_close_short:g}, close a long above "
-               f"{-cfg.s_close_long:g}, each trade {cfg.position:.0%} of equity, mean reversion faster than "
+               f"{-cfg.s_close_long:g}, each new trade {cfg.position:.1%} of equity (the backtest uses 5%; 2.5% keeps a full book inside Alpaca's buying power), mean reversion faster than "
                f"{252 / cfg.min_kappa:.0f} trading days.")
 
 # ---- banner
@@ -187,9 +187,16 @@ if plan.skipped:
 
 # ---- target book
 st.subheader("Target book")
-st.caption(f"Trades that stay open keep their current shares; new trades are {cfg.position:.0%} of equity in whole "
-           "shares (rounded towards zero). Each hedge ETF holds minus side times beta times each trade's dollar value "
-           "at the last close, summed over the trades it hedges, recomputed on every run.")
+st.caption(f"New trades are {cfg.position:.1%} of equity in whole shares (rounded towards zero); the backtest uses 5%, "
+           "and the page halves it so a full book of trades and hedges fits in Alpaca's buying power. Trades that "
+           "stay open keep their current shares, which is what the paper does in practice (it resizes only new "
+           "positions, to save trading costs). The notebook's backtest simplifies by holding each trade at a constant "
+           "fraction of equity, so live and backtest profit and loss will differ slightly. Each hedge ETF holds minus "
+           "side times beta times each trade's dollar value at the last close, summed over the trades it hedges, "
+           "recomputed on every run.")
+st.caption(f"Projected gross exposure after today: ${plan.gross_exposure:,.0f} "
+           f"({plan.gross_exposure / plan.equity:.2f} times equity). New exposure in the orders below: "
+           f"${plan.opening_notional:,.0f}; buying power ${plan.buying_power:,.0f}.")
 if len(plan.book) == 0:
     st.write("No open trades and no hedges after today.")
 else:
@@ -203,17 +210,24 @@ st.subheader("Proposed orders")
 if len(plan.orders) == 0:
     st.success("No orders needed: the account already matches the targets.")
 else:
-    st.caption(f"{len(plan.orders)} orders. Exits and reductions come first (they free buying power), then new "
-               "exposure. Notional is an estimate at the last close; market orders fill at a price we cannot know "
+    st.caption(f"{len(plan.orders)} orders, sent in this order: exits and reductions first (they free buying "
+               "power), then the hedge ETF legs that add exposure, then the new stock trades, so a new trade is "
+               "never left without its hedge because buying power ran out. Notional is an estimate at the last close; market orders fill at a price we cannot know "
                "in advance.")
     st.dataframe(plan.orders.style.format({"qty": "{:,.0f}", "notional": "${:,.0f}",
                                            "current_qty": "{:,.0f}", "target_qty": "{:,.0f}"}, na_rep=""),
                  hide_index=True)
 for note in plan.notes:
     st.caption(f"Note: {note}")
-if plan.open_orders:
-    st.warning(f"Open orders already exist for {', '.join(plan.open_orders)}.")
-busy = sorted(set(plan.open_orders) & set(plan.orders["symbol"]))
+busy = plan.busy
+if busy:
+    st.warning(f"Open orders already exist for strategy symbols: {', '.join(busy)}. Submit stays off until every "
+               "open order on a strategy stock or hedge ETF has filled or been cancelled on the Alpaca website: "
+               "a half-filled trade would otherwise be hedged now at half size and re-hedged later.")
+elif plan.open_orders:
+    st.warning(f"Open orders already exist for {', '.join(plan.open_orders)} (not strategy symbols).")
+if plan.over_buying_power and len(plan.orders) > 0:
+    st.warning("Submit is off: " + live.buying_power_message(plan) + ".")
 
 # ---- submit (Alpaca paper only)
 st.subheader("Submit")
@@ -228,17 +242,21 @@ if mode == ALPACA and getattr(broker, "paper", False) is True:
     if already:
         st.info("Orders for this decision date were already submitted from this page. Come back after the "
                 "next trading day closes.")
-    ready = ok and typed.strip() == live.CONFIRM_WORD and len(plan.orders) > 0 and not already and not busy
+    ready = (ok and typed.strip() == live.CONFIRM_WORD and len(plan.orders) > 0 and not already and not busy
+             and not plan.over_buying_power)
     clicked = st.button("Submit PAPER orders", type="primary", disabled=not ready, key="submit")
     if clicked and ready:  # never on page load: only a click, after the checks above
+        sent = False
         try:
-            if shown_plan is None or shown_plan.decision_date != plan.decision_date:
-                raise Refused("refused: the page changed before the click; look at the orders again, then submit")
-            results = live.submit_plan(broker, shown_plan, confirmed=ok, typed=typed)
+            # submit_checked sends the plan ON SCREEN, and only if the account is still the one it was drawn for
+            results = live.submit_checked(broker, shown_plan, plan, confirmed=ok, typed=typed)
             sent_dates.append(f"{plan.decision_date:%Y-%m-%d}")
             st.session_state["last_results"] = live.results_table(results)
+            sent = True
         except (Refused, BrokerError) as e:
             st.error(safe(e))
+        if sent:
+            st.rerun()             # redraw at once from the account as it now is; the results stay in session state
     if "last_results" in st.session_state:
         res = st.session_state["last_results"]
         counts = res["status"].value_counts().to_dict() if len(res) else {}

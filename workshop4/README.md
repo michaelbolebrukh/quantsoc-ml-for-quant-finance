@@ -21,13 +21,13 @@ the notebook from a Google Drive copy instead.
 | `../quantsoc_ml/avlee.py` | factors, OU fit, s-scores, trading rules, backtest, live signal |
 | `../workshop3/data/sp100_daily.csv.gz` | the stock prices, shared with Workshop 3 |
 
-Run time: about a minute and a half of compute end to end on a 4-core laptop, more on Colab's free tier.
+Run time: about a minute of compute end to end on a 4-core laptop, more on Colab's free tier.
 
 ## Refreshing the data
 
 ```bash
 python workshop4/fetch_data.py      # ETFs and sectors, up to the stock snapshot's last date
-python workshop4/build_cache.py     # re-run the four backtests, about 4 minutes
+python workshop4/build_cache.py     # re-run the four backtests, about 3 minutes
 python -m pytest tests -q
 ```
 
@@ -81,11 +81,17 @@ history and recent orders.
 
 ### How the page sizes trades
 
-* A trade that opens today is 5% of equity in the stock, in whole shares (rounded towards zero).
-* A trade that stays open keeps its current number of shares. The page does not resize it as prices move.
+* A trade that opens today is 2.5% of equity in the stock, in whole shares (rounded towards zero). The notebook's
+  backtest uses 5%; the page halves it because 40 or so open trades plus their hedges at 5% would need about 3
+  times equity, and Alpaca's overnight buying power is about 2 times equity.
+* A trade that stays open keeps its current number of shares. That is what the paper does in practice: it
+  adjusts the size only for new positions, to save trading costs. The notebook's backtest simplifies by holding
+  each open trade at a constant fraction of equity, so live and backtest profit and loss will differ slightly.
 * A trade that closes goes to zero shares.
 * Each hedge ETF holds minus side times beta times each trade's dollar value at the last close, summed over
   the trades it hedges (SPY when the sector fund lacks history). Hedges are recomputed on every run.
+* A held stock with no prices today, or one that has left the universe, is left alone, and so is the hedge ETF
+  that covers it (no orders in that fund this run). The page names both.
 * A new short that Alpaca says is not easy to borrow is not opened, and the page says so. No other stock is
   used in its place.
 
@@ -103,11 +109,19 @@ Wait for those orders to fill, then reload the page.
 
 * Orders are sent only in Alpaca paper mode, only after you tick the box, type SUBMIT and press the button.
   Loading or reloading the page never sends anything.
-* The app sends exactly the orders that were on screen when you clicked, and refuses while open orders exist
-  for any of those symbols (wait for them to fill, or cancel them on the Alpaca website).
+* The app sends exactly the orders that were on screen when you clicked, and refuses if the account changed
+  in between (different positions or open orders, for example after "Close all" on the website). A change in
+  equity alone is fine.
+* Submit stays off while ANY strategy stock or hedge ETF has an open order, for example a half-filled opening
+  order: wait for it to fill, or cancel it on the Alpaca website, then reload.
+* Submit stays off when the new positions need more than the account's buying power; the page says how much
+  they need. Close some trades first, or use a smaller position size.
 * Each order has an id made from the decision date, the symbol and the leg, so pressing twice cannot send it
-  twice. One submission per decision date.
-* Exits and reductions are sent before new exposure. A hedge that flips from long to short (or back) is sent
+  twice. One submission per decision date. Alpaca refuses an id it has already seen, so an order that was
+  rejected cannot be sent again with the same id on the same decision date: it goes out on the next trading
+  day's run instead.
+* Exits and reductions are sent first, then the hedge ETF legs that add exposure, then the new stock trades, so
+  a new trade is never left without its hedge because buying power ran out. A hedge that flips from long to short (or back) is sent
   as two orders; while the market is closed only the closing one is sent, and the rest on the next run.
 * The broker is hard-wired to the Alpaca PAPER endpoint, and error messages are cleaned of your keys before
   they are shown.

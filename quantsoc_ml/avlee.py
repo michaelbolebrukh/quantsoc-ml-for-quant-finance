@@ -13,7 +13,7 @@ The paper's recipe (section numbers refer to the 2008 working paper):
    m = a / (1 - b), sigma_eq = sqrt(Var(zeta) / (1 - b^2)). Only stocks with kappa > 252/30
    (mean reversion within half the window) are traded.
 4. s-score (eq. 22): s = (X_60 - m) / sigma_eq = -m / sigma_eq, with m centred by subtracting the
-   average m across stocks.
+   average m across all stocks with a valid fit that day.
 5. Trading (eq. 16): open long if s < -1.25, open short if s > +1.25, close a short if s < +0.75,
    close a long if s > -0.50. Each position is long (short) the stock and short (long) its factor
    hedge, sized as a fixed fraction of equity. 5 bps per trade.
@@ -58,7 +58,7 @@ class Config:
     s_close_long: float = 0.50      # close a long when s > -0.50
     centre_means: bool = True       # eq. 22: subtract the average m across stocks
     position: float = 0.05          # each open trade is 5% of equity in the stock (plus its hedge)
-    rehedge: str = "daily"          # "daily" (the paper) or "entry": keep each trade's hedge from the day it opened
+    rehedge: str = "daily"          # "daily" (this replication's default) or "entry": keep each trade's opening hedge
     cost_bps: float = 5.0           # per dollar traded
 
 
@@ -171,11 +171,12 @@ def _ar1(resid: np.ndarray) -> Dict[str, np.ndarray]:
 
 
 def s_scores(fit: Dict[str, np.ndarray], cfg: Config) -> Tuple[np.ndarray, np.ndarray]:
-    """(s, eligible). s = (X_60 - m_centred) / sigma_eq; the centring average uses eligible stocks."""
+    """(s, eligible). s = (X_60 - m_centred) / sigma_eq, centred by the average m over every stock
+    with a valid fit (eq. 18 and 22 average over all stocks; the kappa filter only decides who may trade)."""
     eligible = np.isfinite(fit["kappa"]) & (fit["kappa"] > cfg.min_kappa)
     m = fit["m"].copy()
-    if cfg.centre_means and eligible.any():
-        m = m - np.nanmean(m[eligible])
+    if cfg.centre_means and np.isfinite(m).any():
+        m = m - np.nanmean(m)
     s = (fit["x_last"] - m) / fit["sigma_eq"]
     return s, eligible
 
@@ -304,7 +305,9 @@ def run(prices: pd.DataFrame, cfg: Optional[Config] = None, etf_prices: Optional
     """Daily walk through history: estimate at the close of day t, trade at that close, earn day t+1.
 
     Every estimate uses returns up to day t only. `volume` switches on the paper's "trading time"
-    returns (sec. 6) for the signal; P&L always uses ordinary returns.
+    returns (sec. 6) for the estimation, so the hedge ratio also comes from volume-scaled stock
+    returns (the paper does not say either way); P&L always uses ordinary returns. Booked returns
+    fall on dates from `start` to `end` inclusive.
     """
     cfg = cfg or Config()
     R = returns(prices)
@@ -321,7 +324,9 @@ def run(prices: pd.DataFrame, cfg: Optional[Config] = None, etf_prices: Optional
     resid_pnl: Dict[str, float] = {}
     entry_info: Dict[str, dict] = {}
     frozen: Dict[str, pd.Series] = {}
-    for t in range(max(t0, 1), min(t1, len(dates) - 1)):
+    # estimate at the close of day t, earn day t+1: so t runs from the day before `start` to the day
+    # before `end`, and every booked return falls inside [start, end]
+    for t in range(max(t0 - 1, 1), min(t1, len(dates)) - 1):
         d, nxt = dates[t], dates[t + 1]
         fit = estimate_day(R_signal, t, cfg, etf_R, sectors)
         if fit is None:
@@ -329,7 +334,7 @@ def run(prices: pd.DataFrame, cfg: Optional[Config] = None, etf_prices: Optional
         s_map = dict(zip(fit.symbols, fit.s))
         el_map = dict(zip(fit.symbols, fit.eligible))
         new_states = {}
-        for sym in set(states) | set(fit.symbols):
+        for sym in sorted(set(states) | set(fit.symbols)):
             st = next_state(states.get(sym, 0), s_map.get(sym, np.nan), bool(el_map.get(sym, False)), cfg)
             if st:
                 new_states[sym] = st
@@ -366,9 +371,14 @@ def run(prices: pd.DataFrame, cfg: Optional[Config] = None, etf_prices: Optional
         nf[nxt] = fit.n_factors
         # each open trade's own hedged return tomorrow: stock return minus beta times its factors' return
         if states:
-            h = hedged_returns(fit, allR.loc[nxt])
+            r_nxt = allR.loc[nxt]
+            h = hedged_returns(fit, r_nxt)
             for sym, st in states.items():
-                resid_pnl[sym] = resid_pnl.get(sym, 0.0) + st * float(h.get(sym, 0.0))
+                if cfg.rehedge == "entry" and sym in frozen:        # the hedge actually held
+                    leg = frozen[sym]
+                    resid_pnl[sym] = resid_pnl.get(sym, 0.0) + float((leg * r_nxt.reindex(leg.index).fillna(0.0)).sum()) / cfg.position
+                else:
+                    resid_pnl[sym] = resid_pnl.get(sym, 0.0) + st * float(h.get(sym, 0.0))
         if keep_weights:
             saved[d] = w
         prev_w = w
@@ -416,7 +426,7 @@ def live_signal(prices: pd.DataFrame, held: Dict[str, int], cfg: Optional[Config
         raise ValueError("not enough history to estimate the model")
     s_map, el_map = dict(zip(fit.symbols, fit.s)), dict(zip(fit.symbols, fit.eligible))
     states = {}
-    for sym in set(held) | set(fit.symbols):
+    for sym in sorted(set(held) | set(fit.symbols)):
         st = next_state(int(held.get(sym, 0)), s_map.get(sym, np.nan), bool(el_map.get(sym, False)), cfg)
         if st:
             states[sym] = st

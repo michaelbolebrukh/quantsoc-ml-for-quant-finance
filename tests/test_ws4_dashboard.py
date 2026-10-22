@@ -115,14 +115,15 @@ def test_new_trades_are_sized_at_position_times_equity(flat):
     orders = flat.orders.set_index("symbol")
     for sym in flat.opened:
         side = flat.states[sym]
-        expected = np.trunc(side * 0.05 * flat.equity / flat.last_prices[sym])
+        expected = np.trunc(side * flat.cfg.position * flat.equity / flat.last_prices[sym])
         assert orders.loc[sym, "target_qty"] == expected
         assert orders.loc[sym, "qty"] == abs(expected)
         assert orders.loc[sym, "action"] == ("open long" if side > 0 else "open short")
         assert orders.loc[sym, "side"] == ("buy" if side > 0 else "sell")
-        # the dollar value is at most 5% of equity and within one share of it
+        # the dollar value is at most the position size and within one share of it
         dollars = abs(expected) * flat.last_prices[sym]
-        assert 0.05 * flat.equity - flat.last_prices[sym] < dollars <= 0.05 * flat.equity + 1e-6
+        size = flat.cfg.position * flat.equity
+        assert size - flat.last_prices[sym] < dollars <= size + 1e-6
     assert set(flat.orders["alpaca_symbol"]) == {live.to_alpaca(s) for s in flat.orders["symbol"]}
 
 
@@ -166,7 +167,7 @@ def test_etf_hedges_are_minus_side_beta_dollar_value_summed_per_fund(bars, flat,
     dollars = {}
     for sym, side in states.items():
         i = fit.symbols.index(sym)
-        qty = 7.0 if sym == kept_long else np.trunc(side * 0.05 * plan.equity / last[sym])
+        qty = 7.0 if sym == kept_long else np.trunc(side * plan.cfg.position * plan.equity / last[sym])
         fund = fit.hedge_etf[i]
         dollars[fund] = dollars.get(fund, 0.0) - side * fit.beta[i, 0] * abs(qty) * last[sym]
     funds = live.hedge_funds(sectors)
@@ -385,3 +386,152 @@ def test_workshop4_orders_use_their_own_id_prefix(fresh):
     mock, plan = fresh
     results = live.submit_plan(mock, plan, confirmed=True, typed="SUBMIT")
     assert results and all(r.client_order_id.startswith("qsml-ws4-") for r in results)
+
+
+# --------------------------------------------------------------------------- regressions from the falsification pass
+
+class SharedAlpaca(FakeAlpaca):
+    """One fake account shared by every rerun, so a test can change it between the page and the click."""
+
+    def __init__(self, *a, bp=None, **kw):
+        super().__init__(*a, **kw)
+        self.bp = bp
+
+    def account(self):
+        a = super().account()
+        if self.bp is not None:
+            a.buying_power = float(self.bp)
+        return a
+
+
+def _shared_app(broker, monkeypatch):
+    monkeypatch.setenv("APCA_API_KEY_ID", FAKE_KEY)
+    monkeypatch.setenv("APCA_API_SECRET_KEY", FAKE_SECRET)
+    monkeypatch.setattr(live, "connect_alpaca", lambda key, secret: broker)
+    at = _app("Alpaca paper").run()
+    at.checkbox(key="confirm_box").check().run()
+    at.text_input(key="confirm_text").input("SUBMIT").run()
+    return at
+
+
+def _button(at):
+    return [b for b in at.button if b.key == "submit"][0]
+
+
+def test_item1_click_refuses_when_positions_changed_after_the_page_was_drawn(bars, flat, monkeypatch):
+    closing = pick(flat.table, (flat.table["s"] > -0.4) & (flat.table["s"] < 1.0), n=3)
+    acct = SharedAlpaca(bars=bars, cash=EQUITY, positions={live.to_alpaca(s): 20 for s in closing})
+    at = _shared_app(acct, monkeypatch)
+    shown = at.session_state["shown_plan"]
+    assert set(closing) <= set(shown.closed)
+    acct.holdings = {}                                   # flattened elsewhere, e.g. "Close all" on the website
+    acct.cash = EQUITY
+    _button(at).click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert acct.submissions == [], "a plan drawn for a different account must not be sent"
+    assert any("account changed" in e.value for e in at.error)
+
+
+def test_item1_equity_drift_alone_is_allowed():
+    a = live.LivePlan.__new__(live.LivePlan)
+    b = live.LivePlan.__new__(live.LivePlan)
+    a.positions, a.open_orders = {"AAPL": 10.0, "XLK": -3.0}, []
+    b.positions, b.open_orders = {"XLK": -3.0000000001, "AAPL": 10.0}, []
+    assert live.same_account(a, b)
+    b.positions = {"AAPL": 10.0}
+    assert not live.same_account(a, b)
+    b.positions, b.open_orders = dict(a.positions), ["AAPL"]
+    assert not live.same_account(a, b)
+
+
+def test_item2_any_open_order_on_a_strategy_symbol_blocks_submit(bars):
+    first = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=EQUITY)))
+    stock = sorted(s for s in first.opened if first.states[s] > 0)[0]
+    mock = FakeAlpaca(bars=bars, cash=EQUITY, partial_fill={live.to_alpaca(stock): 0.5})
+    plan = live.build_live_plan(ReadOnlyBroker(mock))
+    live.submit_plan(mock, plan, confirmed=True, typed="SUBMIT")
+    assert live.to_alpaca(stock) in mock.open_orders()
+    again = live.build_live_plan(ReadOnlyBroker(mock))
+    assert stock not in set(again.orders["symbol"]) and len(again.orders) > 0
+    assert again.busy == [stock]
+    n = len(mock.submissions)
+    with pytest.raises(Refused, match="open order"):
+        live.submit_checked(mock, again, again, confirmed=True, typed="SUBMIT")
+    assert len(mock.submissions) == n
+
+
+def test_item2_app_disables_submit_while_a_strategy_symbol_has_an_open_order(bars, flat, monkeypatch):
+    idle = sorted(set(flat.table["symbol"]) - set(flat.orders["symbol"]))[0]
+    acct = SharedAlpaca(bars=bars, cash=EQUITY, busy=[live.to_alpaca(idle)])
+    at = _shared_app(acct, monkeypatch)
+    assert _button(at).disabled
+    assert any("open order" in w.value and idle in w.value for w in at.warning)
+    assert acct.submissions == []
+
+
+def test_item3_left_alone_stock_keeps_its_hedge(bars, sectors):
+    filled = FakeAlpaca(bars=bars, cash=EQUITY)
+    flat_plan = live.build_live_plan(ReadOnlyBroker(filled))
+    live.submit_plan(filled, flat_plan, confirmed=True, typed="SUBMIT")
+    short = sorted(s for s in flat_plan.opened if flat_plan.states[s] < 0 and s != "BRK-B")[0]
+    fund = sectors[short]
+    # (a) the stock's bars are missing today
+    no_bars = MockBroker(bars=bars[bars["symbol"] != live.to_alpaca(short)], cash=filled.cash,
+                         positions=filled.positions(), prices=filled.prices)
+    a = live.build_live_plan(ReadOnlyBroker(no_bars))
+    assert fund not in set(a.orders["symbol"]), "the left-alone stock's hedge fund must not be traded"
+    assert any(short in n and fund in n for n in a.notes)
+    # (b) the stock left the universe
+    b = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=filled.cash, positions=filled.positions())),
+                             sectors=sectors.drop(index=short))
+    assert fund not in set(b.orders["symbol"])
+    assert any(short in n and fund in n for n in b.notes)
+
+
+def test_item5a_live_position_is_two_and_a_half_percent(flat):
+    assert live.live_config().position == 0.025 and al.Config().position == 0.05
+    sym = flat.opened[0]
+    assert abs(flat.orders.set_index("symbol").loc[sym, "target_qty"]) == \
+        np.trunc(0.025 * flat.equity / flat.last_prices[sym])
+
+
+def test_item5b_submit_blocked_when_new_exposure_exceeds_buying_power(bars, monkeypatch):
+    probe = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=EQUITY)))
+    assert probe.opening_notional > 0
+    small = SharedAlpaca(bars=bars, cash=EQUITY, bp=probe.opening_notional / 2)
+    plan = live.build_live_plan(ReadOnlyBroker(small))
+    with pytest.raises(Refused, match="buying power"):
+        live.submit_checked(small, plan, plan, confirmed=True, typed="SUBMIT")
+    at = _shared_app(small, monkeypatch)
+    assert _button(at).disabled
+    assert any("buying power" in w.value for w in at.warning)
+    assert small.submissions == []
+
+
+def test_item5c_fund_legs_go_before_new_stock_opens_and_after_reductions(bars, flat):
+    t = flat.table
+    closing = pick(t, (t["s"] > -0.4) & (t["s"] < 1.0), n=1)[0]
+    plan = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=EQUITY,
+                                                          positions={live.to_alpaca(closing): 10, "XLB": 500})))
+    funds = set(live.hedge_funds(al.load_sectors()))
+    adds = plan.orders["action"].str.startswith(("open", "add"))
+    kind = np.where(~adds, 0, np.where(plan.orders["symbol"].isin(funds), 1, 2))
+    assert (np.diff(kind) >= 0).all(), list(zip(plan.orders["symbol"], plan.orders["action"]))
+    assert {0, 1, 2} <= set(kind)
+
+
+def test_item7_page_shows_the_new_state_straight_after_submit(bars, monkeypatch):
+    acct = SharedAlpaca(bars=bars, cash=EQUITY)
+    at = _shared_app(acct, monkeypatch)
+    _button(at).click().run()
+    assert acct.submissions
+    assert _button(at).disabled
+    assert any("already submitted" in i.value for i in at.info)
+    assert any("Last submission" in m.value for m in at.markdown)
+
+
+def test_item8_weights_are_zero_for_trades_too_dear_to_open(bars):
+    plan = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=3_000.0)))
+    dear = [s for s, why in plan.skipped.items() if "costs more" in why]
+    assert dear
+    assert all(plan.weights.get(s, 0.0) == 0.0 for s in dear), plan.weights.reindex(dear)

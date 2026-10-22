@@ -38,7 +38,8 @@ def test_s_score_matches_equation_22():
     a, b = f["a"], f["b"]
     Xc = np.cumsum(Rs - np.column_stack([np.ones(60), F]) @ np.linalg.lstsq(np.column_stack([np.ones(60), F]), Rs, rcond=None)[0], axis=0)
     var_z = (Xc[1:] - (a + b * Xc[:-1])).var(axis=0, ddof=1)
-    mbar = np.nanmean((a / (1 - b))[elig])
+    valid = (b > 0) & (b < 1)
+    mbar = np.nanmean((a / (1 - b))[valid])          # eq. 18 / 22: average over every stock with a valid fit
     eq22 = -a * np.sqrt(1 - b ** 2) / ((1 - b) * np.sqrt(var_z)) + mbar * np.sqrt((1 - b ** 2) / var_z)
     ok = np.isfinite(s)
     np.testing.assert_allclose(s[ok], eq22[ok], rtol=1e-6, atol=1e-6)
@@ -148,3 +149,29 @@ def test_workshop4_notebook_has_no_dashes_and_no_outputs():
         assert not re.search("[–—]", text), text[:80]
         if cell["cell_type"] == "code":
             assert cell["outputs"] == [] and cell["execution_count"] is None
+
+
+
+def test_booked_returns_fall_inside_start_and_end():
+    P = _toy_prices(n_days=360)
+    R = al.returns(P)
+    start, end = R.index[280], R.index[320]
+    bt = al.run(P, al.Config(corr_window=252), start=start, end=end)
+    assert bt.net.index.min() == start and bt.net.index.max() == end
+
+
+def test_trade_log_order_is_deterministic():
+    P = _toy_prices(n_days=360)
+    a = al.run(P, al.Config(corr_window=252)).trades
+    b = al.run(P, al.Config(corr_window=252)).trades
+    pd.testing.assert_frame_equal(a, b)
+    assert list(a.sort_values(["exit", "symbol"], kind="mergesort").index) == list(a.index) or a["exit"].is_monotonic_increasing
+
+
+def test_centring_averages_every_valid_stock_not_just_tradeable_ones():
+    fit = {"kappa": np.array([40.0, 5.0, 40.0]), "m": np.array([0.01, 0.05, -0.01]),
+           "sigma_eq": np.array([1.0, 1.0, 1.0]), "x_last": np.zeros(3)}
+    s, eligible = al.s_scores(fit, al.Config())
+    assert list(eligible) == [True, False, True]            # kappa 5 < 252/30: may not open a trade
+    mbar = (0.01 + 0.05 - 0.01) / 3                         # eq. 18: the average over all stocks
+    np.testing.assert_allclose(s, -(fit["m"] - mbar))
