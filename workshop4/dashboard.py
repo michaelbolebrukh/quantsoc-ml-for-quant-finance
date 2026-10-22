@@ -194,9 +194,10 @@ st.caption(f"New trades are {cfg.position:.1%} of equity in whole shares (rounde
            "fraction of equity, so live and backtest profit and loss will differ slightly. Each hedge ETF holds minus "
            "side times beta times each trade's dollar value at the last close, summed over the trades it hedges, "
            "recomputed on every run.")
-st.caption(f"Projected gross exposure after today: ${plan.gross_exposure:,.0f} "
-           f"({plan.gross_exposure / plan.equity:.2f} times equity). New exposure in the orders below: "
-           f"${plan.opening_notional:,.0f}; buying power ${plan.buying_power:,.0f}.")
+times = f"{plan.gross_exposure / plan.equity:.2f} times equity" if plan.equity > 0 else "n/a times equity"
+st.caption(f"Projected gross exposure after today: ${plan.gross_exposure:,.0f} ({times}). New exposure in the "
+           f"orders below: ${plan.opening_notional:,.0f}; buying power for it ${plan.buying_power_limit:,.0f} "
+           "(Alpaca's overnight figure where it reports one).")
 if len(plan.book) == 0:
     st.write("No open trades and no hedges after today.")
 else:
@@ -227,7 +228,7 @@ if busy:
 elif plan.open_orders:
     st.warning(f"Open orders already exist for {', '.join(plan.open_orders)} (not strategy symbols).")
 if plan.over_buying_power and len(plan.orders) > 0:
-    st.warning("Submit is off: " + live.buying_power_message(plan) + ".")
+    st.warning("The full Submit is off: " + live.buying_power_message(plan) + ".")
 
 # ---- submit (Alpaca paper only)
 st.subheader("Submit")
@@ -245,12 +246,22 @@ if mode == ALPACA and getattr(broker, "paper", False) is True:
     ready = (ok and typed.strip() == live.CONFIRM_WORD and len(plan.orders) > 0 and not already and not busy
              and not plan.over_buying_power)
     clicked = st.button("Submit PAPER orders", type="primary", disabled=not ready, key="submit")
-    if clicked and ready:  # never on page load: only a click, after the checks above
+    exits_clicked = exits_ready = False
+    if plan.over_buying_power and len(plan.exit_orders) > 0:
+        # The full plan is blocked, but cutting risk never needs buying power: offer the exits on their own.
+        st.write(f"The full plan does not fit in buying power. You can still send its {len(plan.exit_orders)} exits "
+                 "and reductions on their own (same confirmation and checks); the new trades stay unsent.")
+        exits_ready = ok and typed.strip() == live.CONFIRM_WORD and not already and not busy
+        exits_clicked = st.button("Submit exits and reductions only (PAPER)", disabled=not exits_ready,
+                                  key="submit_exits")
+    if (clicked and ready) or (exits_clicked and exits_ready):  # never on page load: only a click
         sent = False
+        exits_only = bool(exits_clicked and not clicked)
         try:
             # submit_checked sends the plan ON SCREEN, and only if the account is still the one it was drawn for
-            results = live.submit_checked(broker, shown_plan, plan, confirmed=ok, typed=typed)
-            sent_dates.append(f"{plan.decision_date:%Y-%m-%d}")
+            results = live.submit_checked(broker, shown_plan, plan, confirmed=ok, typed=typed, exits_only=exits_only)
+            if not exits_only:     # the exits alone leave the rest of the day's plan still to send
+                sent_dates.append(f"{plan.decision_date:%Y-%m-%d}")
             st.session_state["last_results"] = live.results_table(results)
             sent = True
         except (Refused, BrokerError) as e:

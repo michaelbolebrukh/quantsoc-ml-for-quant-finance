@@ -13,7 +13,7 @@ The paper's recipe (section numbers refer to the 2008 working paper):
    m = a / (1 - b), sigma_eq = sqrt(Var(zeta) / (1 - b^2)). Only stocks with kappa > 252/30
    (mean reversion within half the window) are traded.
 4. s-score (eq. 22): s = (X_60 - m) / sigma_eq = -m / sigma_eq, with m centred by subtracting the
-   average m across all stocks with a valid fit that day.
+   average m across the stocks whose model is accepted that day (see s_scores for why).
 5. Trading (eq. 16): open long if s < -1.25, open short if s > +1.25, close a short if s < +0.75,
    close a long if s > -0.50. Each position is long (short) the stock and short (long) its factor
    hedge, sized as a fixed fraction of equity. 5 bps per trade.
@@ -171,12 +171,18 @@ def _ar1(resid: np.ndarray) -> Dict[str, np.ndarray]:
 
 
 def s_scores(fit: Dict[str, np.ndarray], cfg: Config) -> Tuple[np.ndarray, np.ndarray]:
-    """(s, eligible). s = (X_60 - m_centred) / sigma_eq, centred by the average m over every stock
-    with a valid fit (eq. 18 and 22 average over all stocks; the kappa filter only decides who may trade)."""
+    """(s, eligible). s = (X_60 - m_centred) / sigma_eq, centred by the average m over the stocks
+    that pass the kappa filter.
+
+    Eq. 18 and 22 average "over different stocks". The appendix says that when b is too close to 1
+    "the model is rejected for the stock under consideration", so this replication averages over the
+    stocks where the model is accepted. It matters: m = a / (1 - b) explodes as b nears 1, and one
+    rejected stock (QCOM on 31 January 2018, m about 490 typical sigmas) would otherwise shift every
+    other s-score by several sigmas and open trades on one side only."""
     eligible = np.isfinite(fit["kappa"]) & (fit["kappa"] > cfg.min_kappa)
     m = fit["m"].copy()
-    if cfg.centre_means and np.isfinite(m).any():
-        m = m - np.nanmean(m)
+    if cfg.centre_means and eligible.any():
+        m = m - np.nanmean(m[eligible])
     s = (fit["x_last"] - m) / fit["sigma_eq"]
     return s, eligible
 

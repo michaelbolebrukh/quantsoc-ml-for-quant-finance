@@ -31,7 +31,12 @@ How the account maps to the strategy, stated because the strategy is STATEFUL:
 * A held stock with no prices at all in today's bars, or one that has left the universe, is left
   alone, with a note (no blind trades). Its hedge fund (its sector fund, and SPY when that fund
   lacks history) is frozen too: no orders in it this run, so the stock does not lose its hedge.
-  A held stock with prices but no valid fit is closed, which is the replication's own rule.
+  When the stock's sector fund cannot be found (a position not in the sector list, for example a
+  stock removed from sectors.csv, or something held for another reason), EVERY fund is frozen.
+  While a fund is frozen, no new trade hedged in it opens (it is listed as skipped, with the
+  reason), and a trade hedged in it that closes today still closes, with a note that the fund
+  needs adjusting by hand or on the next run. A held stock with prices but no valid fit is
+  closed, which is the replication's own rule.
 
 Order of the orders: exits and reductions first (they free buying power), then fund (ETF) legs that
 add exposure, then new stock legs, so a new trade is never left without its hedge because buying
@@ -39,12 +44,16 @@ power ran out first.
 
 Submitting goes through `submit_checked`, which adds the Workshop 4 checks in front of
 `submit_plan`: the account (positions and open orders) must be the one the page was drawn for, no
-strategy symbol may have an open order, and new exposure must fit in buying power.
+strategy symbol may have an open order, and new exposure must fit in buying power. Buying power
+here is the smaller of Alpaca's `buying_power` (which can be the intraday 4x figure) and its
+overnight `regt_buying_power` when the broker reports it. When new exposure does not fit, the
+exits and reductions alone can still be sent (`submit_checked(..., exits_only=True)`), through the
+same checks, so an over-extended account can always cut risk from the page.
 """
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -109,6 +118,7 @@ class LivePlan:
     cfg: al.Config = field(default_factory=live_config)
     notes: List[str] = field(default_factory=list)
     universe: List[str] = field(default_factory=list)   # every strategy symbol: the stocks and the hedge funds
+    regt_buying_power: Optional[float] = None            # overnight (Reg T) buying power, when the broker says
 
     order_id_prefix = "qsml-ws4"        # Workshop 3 uses qsml-ws3, so the two never share an order id
 
@@ -134,8 +144,20 @@ class LivePlan:
         return float(self.orders.loc[adds, "notional"].fillna(0.0).sum())
 
     @property
+    def buying_power_limit(self) -> float:
+        """The buying power new exposure must fit in: the overnight Reg T figure when known, if smaller."""
+        if self.regt_buying_power is None:
+            return float(self.buying_power)
+        return float(min(self.buying_power, self.regt_buying_power))
+
+    @property
     def over_buying_power(self) -> bool:
-        return self.opening_notional > self.buying_power
+        return self.opening_notional > self.buying_power_limit
+
+    @property
+    def exit_orders(self) -> pd.DataFrame:
+        """Only the orders that close or reduce a position, in plan order."""
+        return self.orders[self.orders["action"].isin(REDUCING)].reset_index(drop=True)
 
 
 def same_account(a: "LivePlan", b: "LivePlan") -> bool:
@@ -151,11 +173,13 @@ def same_account(a: "LivePlan", b: "LivePlan") -> bool:
 
 def buying_power_message(plan: "LivePlan") -> str:
     return (f"the new positions need about ${plan.opening_notional:,.0f} but buying power is "
-            f"${plan.buying_power:,.0f}, so some orders would be rejected, possibly a hedge. Use a smaller "
-            "position size, or close some trades first")
+            f"${plan.buying_power_limit:,.0f} (overnight figure where Alpaca reports it), so some orders would be "
+            "rejected, possibly a hedge. Send the exits and reductions on their own first, use a smaller position "
+            "size, or close some trades")
 
 
-def submit_checked(broker, shown: Optional["LivePlan"], fresh: "LivePlan", confirmed: bool, typed: str):
+def submit_checked(broker, shown: Optional["LivePlan"], fresh: "LivePlan", confirmed: bool, typed: str,
+                   exits_only: bool = False):
     """Send `shown` (the plan the user looked at) through Workshop 3's submit_plan, after more checks.
 
     Refuses (raises `Refused`, nothing sent) unless: `shown` exists and has the same decision date
@@ -163,6 +187,9 @@ def submit_checked(broker, shown: Optional["LivePlan"], fresh: "LivePlan", confi
     `shown` was drawn for; no strategy symbol has an open order (a half-filled opening order would
     otherwise be hedged at half size now and re-hedged later); and the new exposure fits in buying
     power. Then submit_plan applies its own checks (paper, the tick box and SUBMIT, the symbols).
+
+    `exits_only=True` sends only the plan's exits and reductions, with every check above except
+    buying power (cutting positions never needs more of it).
     """
     if shown is None or shown.decision_date != fresh.decision_date:
         raise Refused("refused: the page changed before the click; look at the orders again, then submit")
@@ -172,6 +199,8 @@ def submit_checked(broker, shown: Optional["LivePlan"], fresh: "LivePlan", confi
     if fresh.busy:
         raise Refused(f"refused: open orders exist for {', '.join(fresh.busy)}. Wait for every open order on a "
                       "strategy symbol to fill, or cancel it on the Alpaca website, then reload and submit")
+    if exits_only:
+        return submit_plan(broker, replace(shown, orders=shown.exit_orders), confirmed=confirmed, typed=typed)
     if shown.over_buying_power:
         raise Refused("refused: " + buying_power_message(shown))
     return submit_plan(broker, shown, confirmed=confirmed, typed=typed)
@@ -259,8 +288,10 @@ def build_live_plan(view: ReadOnlyBroker, cfg: Optional[al.Config] = None, secto
     if outside:
         notes.append(f"positions outside the strategy are left alone: {', '.join(outside)}")
     # A left-alone stock keeps its hedge: freeze its sector fund (and SPY if that fund lacks history).
+    # With no sector fund to be found, any fund might hold its hedge, so every fund is frozen.
     known = sectors.combine_first(al.load_sectors())
     frozen: Dict[str, List[str]] = {}
+    no_sector = [s for s in outside if s not in known.index]
     for sym in blind + [s for s in outside if s in known.index]:
         fund = str(known[sym])
         complete = fund in E.columns and not E[fund].iloc[-cfg.window:].isna().any()
@@ -269,6 +300,13 @@ def build_live_plan(view: ReadOnlyBroker, cfg: Optional[al.Config] = None, secto
     for f, syms in sorted(frozen.items()):
         notes.append(f"{', '.join(syms)} {'is' if len(syms) == 1 else 'are'} left alone, so {f}, the fund that "
                      f"hedges {'it' if len(syms) == 1 else 'them'}, is left as it is: no orders in {f} this run")
+    if no_sector:
+        for f in funds:
+            frozen.setdefault(f, []).extend(s for s in no_sector if s not in frozen.get(f, []))
+        notes.append(f"{', '.join(no_sector)} {'is' if len(no_sector) == 1 else 'are'} not in the strategy's sector "
+                     "list (a stock that left the universe, or a position held for another reason), so its hedge "
+                     "fund is unknown: every fund is left as it is and no new trade opens this run. If it is not "
+                     "one of this strategy's trades, close it on the Alpaca website")
 
     # ---- the signal
     fit, states, weights = al.live_signal(P, held, cfg, E, sectors)
@@ -283,6 +321,13 @@ def build_live_plan(view: ReadOnlyBroker, cfg: Optional[al.Config] = None, secto
             unknown.append(sym)
     if unknown:
         notes.append(f"could not check borrow for {', '.join(unknown)}: opened anyway, but the broker may reject the short")
+    idx = {s: i for i, s in enumerate(fit.symbols)}
+    for sym in sorted(s for s in states if held.get(s, 0) == 0):
+        fund = str(fit.hedge_etf[idx[sym]])
+        if fund in frozen:                                # its hedge could not be placed this run
+            del states[sym]
+            who = frozen[fund]
+            skipped[sym] = f"hedge fund {fund} is frozen because {', '.join(who)} {'is' if len(who) == 1 else 'are'} left alone"
 
     # ---- target shares: stock legs
     targets: Dict[str, float] = {}
@@ -311,8 +356,13 @@ def build_live_plan(view: ReadOnlyBroker, cfg: Optional[al.Config] = None, secto
         notes.append(f"closed because there is no valid fit today (a gap in the last {cfg.window} days of prices, "
                      f"or no mean reversion): {', '.join(no_fit)}. This is the replication's rule")
 
+    for sym in closed:
+        fund = str(fit.hedge_etf[idx[sym]]) if sym in idx else str(known.get(sym, ""))
+        if fund in frozen:
+            notes.append(f"{sym} closes, but its hedge fund {fund} is frozen this run, so {fund}'s position is left "
+                         "unchanged: adjust it by hand or on the next run")
+
     # ---- target shares: fund hedges, -side x beta x dollar value, summed per fund
-    idx = {s: i for i, s in enumerate(fit.symbols)}
     hedge_dollars: Dict[str, float] = {f: 0.0 for f in funds}
     hedge_of: Dict[str, str] = {}
     for sym, st in states.items():
@@ -337,13 +387,14 @@ def build_live_plan(view: ReadOnlyBroker, cfg: Optional[al.Config] = None, secto
             notes.append(f"{sym} is not easy to borrow today: the broker will probably reject that hedge short")
 
     table = _signal_table(fit, sectors, held, states, skipped, stocks)
-    book = _book_table(targets, positions, last_prices, states, hedge_of, hedge_dollars, equity, funds)
+    book = _book_table(targets, positions, last_prices, states, hedge_of, hedge_dollars, equity, funds, frozen)
     open_orders = sorted(from_alpaca(s) for s in view.open_orders())
     return LivePlan(decision_date=decision_date, table=table, held=held, states=dict(states), weights=weights,
                     book=book, orders=orders, opened=opened, kept=kept, closed=closed, skipped=skipped,
                     equity=equity, cash=float(acct.cash), buying_power=float(acct.buying_power),
                     positions=positions, last_prices=last_prices, open_orders=open_orders, clock=clock,
-                    cfg=cfg, notes=notes, universe=sorted(set(stocks) | set(funds)))
+                    cfg=cfg, notes=notes, universe=sorted(set(stocks) | set(funds)),
+                    regt_buying_power=getattr(acct, "regt_buying_power", None))
 
 
 # --------------------------------------------------------------------------- tables for display
@@ -386,7 +437,8 @@ def _signal_table(fit, sectors: pd.Series, held, states, skipped, stocks) -> pd.
     return out.sort_values("s", na_position="last", kind="mergesort").reset_index(drop=True)
 
 
-def _book_table(targets, positions, last_prices, states, hedge_of, hedge_dollars, equity, funds) -> pd.DataFrame:
+def _book_table(targets, positions, last_prices, states, hedge_of, hedge_dollars, equity, funds,
+                frozen=None) -> pd.DataFrame:
     """The target book after today: each open stock leg and each fund hedge, in shares and dollars."""
     cols = ["symbol", "leg", "side", "current shares", "target shares", "last close", "target $", "target weight",
             "hedges"]
@@ -402,10 +454,14 @@ def _book_table(targets, positions, last_prices, states, hedge_of, hedge_dollars
             continue
         px = last_prices.get(fund, np.nan)
         covers = sorted(s for s, f in hedge_of.items() if f == fund)
+        text = ", ".join(covers)
+        if frozen and fund in frozen:
+            text = (f"frozen this run: holds the hedge of {', '.join(frozen[fund])} (left alone)"
+                    + (f", and of {text}" if text else ""))
         rows.append({"symbol": fund, "leg": "hedge", "side": "long" if q > 0 else ("short" if q < 0 else "flat"),
                      "current shares": positions.get(fund, 0.0), "target shares": q, "last close": px,
                      "target $": q * px, "target weight": q * px / equity if equity else np.nan,
-                     "hedges": ", ".join(covers)})
+                     "hedges": text})
     return pd.DataFrame(rows, columns=cols)
 
 

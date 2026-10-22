@@ -321,6 +321,9 @@ class AccountInfo:
     equity: float
     cash: float
     buying_power: float
+    # Alpaca's overnight (Reg T) buying power, about 2x equity on a margin account. `buying_power` can be
+    # the larger intraday day-trading figure. None where the broker does not report it (MockBroker).
+    regt_buying_power: Optional[float] = None
 
 
 @dataclass
@@ -410,7 +413,9 @@ class AlpacaPaperBroker:
 
     def account(self) -> AccountInfo:
         a = self._call(self._trading.get_account)
-        return AccountInfo(equity=float(a.equity), cash=float(a.cash), buying_power=float(a.buying_power))
+        regt = getattr(a, "regt_buying_power", None)
+        return AccountInfo(equity=float(a.equity), cash=float(a.cash), buying_power=float(a.buying_power),
+                           regt_buying_power=float(regt) if regt is not None else None)
 
     def positions(self) -> Dict[str, float]:
         out = {}

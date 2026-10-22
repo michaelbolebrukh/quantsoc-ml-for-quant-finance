@@ -91,7 +91,11 @@ history and recent orders.
 * Each hedge ETF holds minus side times beta times each trade's dollar value at the last close, summed over
   the trades it hedges (SPY when the sector fund lacks history). Hedges are recomputed on every run.
 * A held stock with no prices today, or one that has left the universe, is left alone, and so is the hedge ETF
-  that covers it (no orders in that fund this run). The page names both.
+  that covers it (no orders in that fund this run). The page names both. If the stock's sector fund cannot be
+  found (it is no longer in `sectors.csv`, or the position is held for another reason), every hedge ETF is left
+  alone. While a fund is left alone, no new trade hedged in it opens (the page lists those as not opened, with
+  the reason), and a trade hedged in it that closes still closes, with a note that the fund needs adjusting by
+  hand or on the next run.
 * A new short that Alpaca says is not easy to borrow is not opened, and the page says so. No other stock is
   used in its place.
 
@@ -114,8 +118,10 @@ Wait for those orders to fill, then reload the page.
   equity alone is fine.
 * Submit stays off while ANY strategy stock or hedge ETF has an open order, for example a half-filled opening
   order: wait for it to fill, or cancel it on the Alpaca website, then reload.
-* Submit stays off when the new positions need more than the account's buying power; the page says how much
-  they need. Close some trades first, or use a smaller position size.
+* The full Submit stays off when the new positions need more than the account's buying power (Alpaca's
+  overnight Reg T figure, about 2 times equity, when it reports one; the plain buying power can be the larger
+  intraday figure). The page says how much they need, and offers a separate button that sends only the exits
+  and reductions, with the same confirmation and checks, so you can always cut risk.
 * Each order has an id made from the decision date, the symbol and the leg, so pressing twice cannot send it
   twice. One submission per decision date. Alpaca refuses an id it has already seen, so an order that was
   rejected cannot be sent again with the same id on the same decision date: it goes out on the next trading

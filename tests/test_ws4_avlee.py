@@ -38,8 +38,7 @@ def test_s_score_matches_equation_22():
     a, b = f["a"], f["b"]
     Xc = np.cumsum(Rs - np.column_stack([np.ones(60), F]) @ np.linalg.lstsq(np.column_stack([np.ones(60), F]), Rs, rcond=None)[0], axis=0)
     var_z = (Xc[1:] - (a + b * Xc[:-1])).var(axis=0, ddof=1)
-    valid = (b > 0) & (b < 1)
-    mbar = np.nanmean((a / (1 - b))[valid])          # eq. 18 / 22: average over every stock with a valid fit
+    mbar = np.nanmean((a / (1 - b))[elig])           # eq. 18 / 22, over the stocks whose model is accepted
     eq22 = -a * np.sqrt(1 - b ** 2) / ((1 - b) * np.sqrt(var_z)) + mbar * np.sqrt((1 - b ** 2) / var_z)
     ok = np.isfinite(s)
     np.testing.assert_allclose(s[ok], eq22[ok], rtol=1e-6, atol=1e-6)
@@ -168,10 +167,13 @@ def test_trade_log_order_is_deterministic():
     assert list(a.sort_values(["exit", "symbol"], kind="mergesort").index) == list(a.index) or a["exit"].is_monotonic_increasing
 
 
-def test_centring_averages_every_valid_stock_not_just_tradeable_ones():
-    fit = {"kappa": np.array([40.0, 5.0, 40.0]), "m": np.array([0.01, 0.05, -0.01]),
+def test_centring_ignores_stocks_whose_model_is_rejected():
+    # A near-random-walk stock (b close to 1, kappa below 252/30) has an exploding m = a / (1 - b).
+    # The appendix rejects the model for such a stock, so it must not move everyone else's s-score.
+    fit = {"kappa": np.array([40.0, 0.5, 40.0]), "m": np.array([0.01, -9.67, -0.01]),
            "sigma_eq": np.array([1.0, 1.0, 1.0]), "x_last": np.zeros(3)}
     s, eligible = al.s_scores(fit, al.Config())
-    assert list(eligible) == [True, False, True]            # kappa 5 < 252/30: may not open a trade
-    mbar = (0.01 + 0.05 - 0.01) / 3                         # eq. 18: the average over all stocks
+    assert list(eligible) == [True, False, True]
+    mbar = (0.01 - 0.01) / 2                                # average over the accepted stocks only
     np.testing.assert_allclose(s, -(fit["m"] - mbar))
+    assert abs(s[0]) < 0.1 and abs(s[2]) < 0.1             # the outlier does not push them past 1.25

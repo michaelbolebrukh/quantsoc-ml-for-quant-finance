@@ -393,14 +393,17 @@ def test_workshop4_orders_use_their_own_id_prefix(fresh):
 class SharedAlpaca(FakeAlpaca):
     """One fake account shared by every rerun, so a test can change it between the page and the click."""
 
-    def __init__(self, *a, bp=None, **kw):
+    def __init__(self, *a, bp=None, regt=None, **kw):
         super().__init__(*a, **kw)
         self.bp = bp
+        self.regt = regt
 
     def account(self):
         a = super().account()
         if self.bp is not None:
             a.buying_power = float(self.bp)
+        if self.regt is not None:
+            a.regt_buying_power = float(self.regt)
         return a
 
 
@@ -481,11 +484,15 @@ def test_item3_left_alone_stock_keeps_its_hedge(bars, sectors):
     a = live.build_live_plan(ReadOnlyBroker(no_bars))
     assert fund not in set(a.orders["symbol"]), "the left-alone stock's hedge fund must not be traded"
     assert any(short in n and fund in n for n in a.notes)
-    # (b) the stock left the universe
-    b = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=filled.cash, positions=filled.positions())),
-                             sectors=sectors.drop(index=short))
-    assert fund not in set(b.orders["symbol"])
-    assert any(short in n and fund in n for n in b.notes)
+    # (b) the stock left the universe: gone from the sectors FILE the code reads, not just from an argument
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(live.al, "load_sectors", lambda path=None: sectors.drop(index=short))
+    try:
+        b = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=filled.cash, positions=filled.positions())))
+    finally:
+        monkey.undo()
+    assert short not in b.held and fund not in set(b.orders["symbol"])
+    assert any(short in n and "every fund" in n for n in b.notes)
 
 
 def test_item5a_live_position_is_two_and_a_half_percent(flat):
@@ -535,3 +542,115 @@ def test_item8_weights_are_zero_for_trades_too_dear_to_open(bars):
     dear = [s for s, why in plan.skipped.items() if "costs more" in why]
     assert dear
     assert all(plan.weights.get(s, 0.0) == 0.0 for s in dear), plan.weights.reindex(dear)
+
+
+# --------------------------------------------------------------------------- regressions from the fix-verification pass
+
+def _blind_plan(bars, short, extra=None):
+    """A plan where `short` is held short but has no bars today, plus `extra` positions."""
+    pos = {live.to_alpaca(short): -6.0, "XLV": 30.0, **(extra or {})}
+    return live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars[bars["symbol"] != live.to_alpaca(short)],
+                                                          cash=EQUITY, positions=pos)))
+
+
+def test_n2_no_new_trade_opens_into_a_frozen_fund(bars, flat, sectors):
+    in_xlv = sorted(s for s in flat.opened if sectors.get(s) == "XLV" and s != "UNH")
+    assert in_xlv, "the flat plan should open trades hedged with XLV"
+    plan = _blind_plan(bars, "UNH")
+    assert not set(in_xlv) & set(plan.opened)
+    for sym in in_xlv:
+        assert plan.skipped[sym] == "hedge fund XLV is frozen because UNH is left alone"
+    assert "XLV" not in set(plan.orders["symbol"])
+    others = sorted(s for s in flat.opened if sectors.get(s) != "XLV" and s != "UNH")
+    assert set(others) <= set(plan.opened), "trades hedged in other funds still open"
+    row = plan.book.set_index("symbol").loc["XLV"]
+    assert row["target shares"] == 30 and str(row["hedges"]).startswith("frozen") and "UNH" in row["hedges"]
+    assert not any(s in row["hedges"] for s in in_xlv)
+
+
+def test_n2_a_close_in_a_frozen_fund_goes_ahead_with_a_note(bars, flat, sectors):
+    t = flat.table
+    closer = pick(t, (t["sector fund"] == "XLV") & (t["s"] > -0.4) & (t["symbol"] != "UNH"), n=1)[0]
+    plan = _blind_plan(bars, "UNH", extra={live.to_alpaca(closer): 10.0})
+    assert closer in plan.closed
+    row = plan.orders.set_index("symbol").loc[closer]
+    assert row["action"] == "close long" and row["qty"] == 10
+    assert "XLV" not in set(plan.orders["symbol"])
+    assert any(closer in n and "XLV" in n and "left unchanged" in n for n in plan.notes)
+
+
+def test_n3_stock_gone_from_the_sectors_file_freezes_every_fund(bars, sectors, monkeypatch):
+    monkeypatch.setattr(live.al, "load_sectors", lambda path=None: sectors.drop(index="UNH"))
+    plan = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=EQUITY,
+                                                          positions={"UNH": -6.0, "XLV": 30.0, "XLK": -4.0})))
+    funds = set(live.hedge_funds(sectors))
+    assert not funds & set(plan.orders["symbol"]), "no fund may be traded while UNH's hedge fund is unknown"
+    assert not plan.opened and all("frozen" in why for why in plan.skipped.values())
+    assert any("UNH" in n and "every fund" in n for n in plan.notes)
+
+
+def test_n4a_account_info_has_an_optional_regt_buying_power():
+    from types import SimpleNamespace as NS
+    from quantsoc_ml.paper import AccountInfo, AlpacaPaperBroker
+    assert AccountInfo(1.0, 2.0, 3.0).regt_buying_power is None
+    assert MockBroker(cash=10.0).account().regt_buying_power is None
+
+    class FakeTrading:
+        def get_account(self):
+            return NS(equity="100000", cash="50000", buying_power="400000", regt_buying_power="200000")
+    broker = AlpacaPaperBroker.__new__(AlpacaPaperBroker)        # skip __init__: no keys, no real clients
+    broker._trading = FakeTrading()
+    broker.scrub = str
+    acct = broker.account()
+    assert (acct.buying_power, acct.regt_buying_power) == (400_000.0, 200_000.0)
+
+
+def test_n4b_limit_is_the_overnight_regt_figure_when_present(bars):
+    probe = live.build_live_plan(ReadOnlyBroker(MockBroker(bars=bars, cash=EQUITY)))
+    acct = SharedAlpaca(bars=bars, cash=EQUITY, bp=probe.opening_notional * 4, regt=probe.opening_notional / 2)
+    plan = live.build_live_plan(ReadOnlyBroker(acct))
+    assert plan.buying_power_limit == probe.opening_notional / 2 and plan.over_buying_power
+
+
+def test_n4c_exits_only_submit_sends_only_reductions(bars, flat, monkeypatch):
+    t = flat.table
+    closer = pick(t, (t["s"] > -0.4) & (t["s"] < 1.0), n=1)[0]
+    acct = SharedAlpaca(bars=bars, cash=EQUITY, positions={live.to_alpaca(closer): 20.0, "XLB": 500.0}, bp=1.0)
+    plan = live.build_live_plan(ReadOnlyBroker(acct))
+    assert plan.over_buying_power
+    with pytest.raises(Refused, match="buying power"):
+        live.submit_checked(acct, plan, plan, confirmed=True, typed="SUBMIT")
+    at = _shared_app(acct, monkeypatch)
+    assert _button(at).disabled
+    exits = [b for b in at.button if b.key == "submit_exits"]
+    assert len(exits) == 1 and not exits[0].disabled
+    exits[0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    sent = [(s["symbol"], s["client_order_id"].rsplit("-", 2)[-2:]) for s in acct.submissions]
+    assert sent and {sym for sym, _ in sent} == {live.to_alpaca(closer), "XLB"}
+    assert all(leg[0] in ("close", "reduce") for _, leg in sent), sent
+
+
+def test_n4c_exits_only_keeps_the_stale_plan_and_busy_checks(bars, flat):
+    t = flat.table
+    closer = pick(t, (t["s"] > -0.4) & (t["s"] < 1.0), n=1)[0]
+    acct = SharedAlpaca(bars=bars, cash=EQUITY, positions={live.to_alpaca(closer): 20.0}, bp=1.0)
+    shown = live.build_live_plan(ReadOnlyBroker(acct))
+    acct.holdings = {}
+    fresh = live.build_live_plan(ReadOnlyBroker(acct))
+    with pytest.raises(Refused, match="account changed"):
+        live.submit_checked(acct, shown, fresh, confirmed=True, typed="SUBMIT", exits_only=True)
+    acct.holdings, acct.busy = {live.to_alpaca(closer): 20.0}, ["XLK"]
+    busy = live.build_live_plan(ReadOnlyBroker(acct))
+    with pytest.raises(Refused, match="open orders"):
+        live.submit_checked(acct, busy, busy, confirmed=True, typed="SUBMIT", exits_only=True)
+    with pytest.raises(Refused):
+        live.submit_checked(acct, busy, busy, confirmed=False, typed="SUBMIT", exits_only=True)
+    assert acct.submissions == []
+
+
+def test_n5_zero_equity_account_renders(bars, monkeypatch):
+    acct = SharedAlpaca(bars=bars, cash=0.0)
+    at = _shared_app(acct, monkeypatch)
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("n/a" in c.value for c in at.caption)
