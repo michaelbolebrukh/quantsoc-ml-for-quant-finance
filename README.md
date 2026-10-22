@@ -1,5 +1,9 @@
 # Machine Learning for Quantitative Finance (Part 1)
 
+> **Workshop 4:** statistical arbitrage with stochastic processes, a replication of Avellaneda & Lee (2010) with
+> an Alpaca paper-trading dashboard. See [`workshop4/README.md`](workshop4/README.md) or
+> [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop4/workshop4.ipynb).
+>
 > **Workshop 3 (16 October 2026):** hands-on ML for trading, a replication of Krauss, Do & Huck (2017) with an
 > Alpaca paper-trading dashboard. See [`workshop3/README.md`](workshop3/README.md) or
 > [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop3/workshop3.ipynb).
