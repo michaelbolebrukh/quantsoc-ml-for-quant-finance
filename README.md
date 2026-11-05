@@ -1,5 +1,9 @@
 # Machine Learning for Quantitative Finance (Part 1)
 
+> **Workshop 5:** can a neural network read a stock chart? A replication of Jiang, Kelly & Xiu (2023), a CNN on
+> price-chart images, with an Alpaca paper-trading dashboard. See [`workshop5/README.md`](workshop5/README.md) or
+> [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop5/workshop5.ipynb).
+>
 > **Workshop 4:** statistical arbitrage with stochastic processes, a replication of Avellaneda & Lee (2010) with
 > an Alpaca paper-trading dashboard. See [`workshop4/README.md`](workshop4/README.md) or
 > [open the notebook in Colab](https://colab.research.google.com/github/michaelbolebrukh/quantsoc-ml-for-quant-finance/blob/main/workshop4/workshop4.ipynb).
