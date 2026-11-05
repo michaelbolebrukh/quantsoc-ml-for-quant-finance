@@ -159,8 +159,8 @@ The value-weight number is the better yardstick for us, because our 100 stocks a
 Equal weights give a tiny company as much money as Apple, and thousands of small stocks sit in the paper's
 equal-weight portfolios. (One more hint, to read with care: when the paper *trained* only on the 2,000 largest
 stocks, still testing on all of them, the equal-weight Sharpe ratio fell from 2.16 to 0.44, while value-weight
-barely moved, 0.49 to 0.42. The paper itself concludes there is no benefit to restricting training to large
-stocks; Table 17.)
+barely moved, 0.49 to 0.42; for the 5-day pictures we use, 2.35 to 1.16 and 0.45 to 0.64. The paper itself
+concludes there is no benefit to restricting training to large stocks; Table 17.)
 """)
 
 # ------------------------------------------------------------------------------------------- 2 data
@@ -243,8 +243,8 @@ md("""
 A label is 1 if the stock's return over the next $h$ days is positive, 0 otherwise. Two models are cached:
 
 * **I5R5**: 5-day pictures, is the next **week** up? (the paper's strongest result, Table 6)
-* **I5R20**: the same 5-day pictures, is the next **month** (20 trading days) up? (Table 3, where it is the
-  paper's best monthly model: equal-weight Sharpe 2.35, value-weight 0.45)
+* **I5R20**: the same 5-day pictures, is the next **month** (20 trading days) up? (Tables 3 and 4: the
+  paper's best equal-weight monthly Sharpe ratio, 2.35; value weight 0.45)
 
 The paper's headline 20-day pictures (I20R20) are drawn and built in parts 3 and 6, but not cached: see part 7.
 
@@ -384,10 +384,18 @@ epochs in a row (we keep the best epoch's weights; the paper does not say). Five
 starts, averaged.
 
 **What did not work: the 20-day network.** Its pictures are 16 times bigger, and on the laptop CPU this cache was
-built on it trains at about 85 pictures a second, so we tried it on one picture every 5 days per stock (33,418
+built on it trains at well under 100 pictures a second, so we tried it on one picture every 5 days per stock (33,418
 pictures for 708,866 parameters). It never learned: its validation loss stayed above that of simply always
 predicting the training years' 57% share of "up", at either learning rate we tried. With a fifth of the data it
 had too little to learn from, so the monthly model here is I5R20. Exercise E is to do better on a GPU.
+
+**I5R20 is only a tie, and you should know that before part 8.** Its best validation loss matches that same
+"always say 57% up" line (0.683 to 0.685 against 0.683 to 0.685, seed by seed), and at its best epoch it calls
+almost every validation picture "up". So its accuracy tells you nothing. It is kept for one reason: a long/short
+book only needs the *ranking*, which stock is more likely to rise than another, and a network can rank a little
+even while every probability sits above 50%. Whether it ranks usefully is a question for the test years, in parts 8
+and 9. I5R5 does slightly better on validation: every one of its five networks beats its own "always say 53%"
+line, by 0.001 to 0.002.
 
 Training all of that took a while on a laptop CPU, so the networks are cached (`workshop5/build_cache.py`
 trained them with the code you see here). Their training curves:
@@ -402,7 +410,9 @@ for name in ("I5R5", "I5R20"):
                              f"learning rate {h.lr.iloc[0]:g}", up_share[name])
 ''')
 md("""
-Two things to notice. The validation loss barely gets below the red lines: **ln 2 = 0.693** is the loss of a
+Two things to notice. The validation loss barely gets below the red lines for I5R5, and only ties the dotted
+line for I5R20 (the line is computed from every 5th day's pictures, so it is a close approximation to each
+network's own validation split): **ln 2 = 0.693** is the loss of a
 model that always says 50/50, and the dotted line is a model that always says the training years' share of "up"
 (57% for months, 53% for weeks), which knows nothing about any one stock. Accuracy sits close to that share too. Stock returns are mostly noise;
 the paper's own validation loss for its 20-day model was 0.687 (Table 18). A little signal in a lot of noise is the whole game.
@@ -416,7 +426,7 @@ and early stopping on them is a little optimistic. The 2008 onwards test is unto
 
 **Train one yourself.** This trains a fresh 5-day network on a sample of the training pictures. Expect a minute
 or two per epoch on Colab's CPU and seconds on a GPU. Do not expect much. The cached networks also started worse
-than a coin flip (a first validation loss of about 0.77) and needed several epochs over 120,000 pictures to settle;
+than a coin flip, or barely better (first validation losses between 0.70 and 0.77), and needed several epochs over 120,000 pictures to settle;
 with 20,000 pictures and 3 epochs, yours will probably still be jumping about, with accuracy near 50%. That is the
 point: watch the training loss fall while the validation loss refuses to follow, then try `N = 100_000` on a GPU.
 """)
@@ -472,6 +482,14 @@ also blown about by the market: in a rising month most stocks go up, so a model 
 The correlation, which only cares about ranking stocks against each other, is the fairer score for a long/short
 book. And remember Workshop 3's lesson on multiple testing: this table holds eight signals, so one t-statistic
 near 2 on its own proves little.
+
+**What we found** (2008 to October 2026). The CNN accuracies look impressive, 54.3% and 57.6% with big
+t-statistics, and they are an illusion. I5R5 says "up" for 91% of pictures and I5R20 for all of them, while on an
+average test date 54.9% of stocks rose over the next week and 57.6% over the next month. Always saying "up" would
+score the same or better. The t-statistic only tests against 50%, and 50% is the wrong yardstick here.
+
+The rank correlation is the honest score. I5R5 ranks stocks about as well as weekly reversal (0.018 for both,
+t-statistics 3.4 and 2.8). I5R20 manages 0.011, with a t-statistic of 1.3, no better than luck.
 """)
 
 # ------------------------------------------------------------------------------------------- 9 portfolios
@@ -518,6 +536,17 @@ by = pd.DataFrame({name: {k: b.window(a, z).paper_stats()["Sharpe (after costs)"
                    for name, (a, z) in cuts.items()})
 display(by.round(2).style.set_caption("Sharpe ratio after costs, by period"))
 ''')
+md("""
+**What we found.** Before costs, the weekly CNN (I5R5) earns a Sharpe ratio of 0.65, the same as plain weekly
+reversal (0.64). Both turn over about 3.5 times their capital each week, so 5 bps per dollar traded takes most of
+it: 0.12 after costs for the CNN, 0.30 for WSTR. The monthly CNN (I5R20) earns 0.15 before costs and nothing after.
+The deciles chart tells the same story: for I5R5, decile 1 earns about 9% a year before costs and deciles 8 to
+10 about 20%, but the long leg is no better than WSTR's; I5R20's bars are flat.
+
+By period, most of I5R5's money was made in the 2008 to 2009 crisis (Sharpe 1.47, like WSTR's 1.39), when
+reversal was strong. It is near zero from 2010 to 2022 and clearly negative since 2023 (-0.89). That is the
+pattern Workshops 3 and 4 found too: price-based signals in big stocks have faded.
+""")
 
 # ------------------------------------------------------------------------------------------- 10 Grad-CAM
 md("""
@@ -567,6 +596,10 @@ week's return, a reversal component. Our WSTR row is *minus* last week's return,
 a **positive** number. The paper's forecasts become more momentum-like and size-like for longer pictures and
 horizons. A large positive WSTR correlation would mean the network has largely rediscovered weekly reversal,
 which you could compute in one line.
+
+**What we found.** It has. The rank correlation with WSTR is 0.58 for I5R5 and 0.51 for I5R20, more than the
+paper's 26% to 34%, and about 0.3 with monthly reversal. Momentum, volatility and size barely register. From five
+days of pictures, the network mostly learned "buy what just fell, sell what just rose".
 """)
 
 # ------------------------------------------------------------------------------------------- 11 trilogy
@@ -599,6 +632,10 @@ display(three.corr().round(2).style.set_caption("Correlation of daily returns"))
 plots3.equity({c: three[c] for c in three}, "Three workshops after costs, 2008 to 2026 (growth of $1)");
 ''')
 md("""
+**What we found.** After costs, from 2008: Workshop 3's daily machine learning loses heavily (Sharpe -0.76),
+Workshop 4's OU stat arb and the weekly CNN are both barely positive (0.13 and 0.12), and the monthly CNN is flat
+(-0.02). The daily correlations are low, 0.07 to 0.25, so the three workshops found mostly different things.
+
 *Discuss:* which ideas overlap (look at the correlations), and which is cheapest to trade? Would a blend of the
 three be better than any one of them? Try `three.mean(axis=1)` with `perf_stats`.
 """)
@@ -706,7 +743,10 @@ md("""
 * A chart is a grid of numbers. Drawn the paper's way, it packs trend, volatility and volume into one picture.
 * A CNN learns its own pattern detectors from those pictures; built from the paper's rules, ours has exactly the
   paper's parameter counts.
-* Barely-better-than-a-coin-flip accuracy can still rank stocks, which is what a long/short book needs.
+* Accuracy against 50% is a trap: our networks mostly say "up", and so do most stocks. Rank correlation is the
+  honest score, and the weekly network does rank stocks (0.018, t 3.4).
+* What it learned is mostly weekly reversal (rank correlation 0.58 with WSTR): a Sharpe ratio of 0.65 before costs,
+  0.12 after, most of it earned in the 2008 to 2009 crisis. The monthly network learned nothing usable.
 * On 100 mega-caps after costs, most of the paper's edge does not survive, as the paper's own large-stock results
   warned. The method is general; the opportunity is where the paper found it, in a wide, small-cap universe.
 """)

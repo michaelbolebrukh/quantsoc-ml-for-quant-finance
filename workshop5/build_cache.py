@@ -25,8 +25,13 @@ Everything here was fixed before any prediction for 2008 onwards was looked at:
   Training on every day's picture would take most of a day here. So the monthly model is I5R20
   (5-day pictures, 20-day returns, the paper's Table 3 has it), and the 20-day network is left as a GPU
   exercise in the notebook. The I20R20 settings below stay for anyone who wants to try.
+* I5R20's best validation losses (0.6848, 0.6832, 0.6839, 0.6839, 0.6845 for seeds 0-4) only tie always
+  predicting each validation split's share of up (0.6846, 0.6833, 0.6831, 0.6838, 0.6844), and at the best
+  epoch its validation accuracy equals that share, so it calls nearly every picture up. It is kept because the decile book uses only the ranking; the notebook says so and tests it out of sample.
+  Every I5R5 seed beats its own base-rate loss, by 0.0008 to 0.0019.
 * 20-day pictures: a picture every TRAIN_EVERY trading days in training (the CPU this cache was built
-  on trains about 85 pictures a second for this network), predictions every 5 days in the test.
+  on trained roughly 40 to 75 pictures a second for this network, including validation), predictions every
+  5 days in the test.
 """
 import argparse
 import sys

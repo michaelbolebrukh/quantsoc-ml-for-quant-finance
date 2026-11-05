@@ -31,25 +31,35 @@ minutes; the optional training cell in part 7 is faster on a GPU.
 ## How the cache was made, and the choices that differ from the paper
 
 * Universe: today's S&P 100 (102 tickers), not every US stock. Expect weaker results: the paper's equal-weight
-  portfolios include thousands of small stocks, and its value-weight Sharpe ratios (about 0.5 at the monthly
-  horizon, Table 4) are the closer yardstick for a mega-cap universe.
+  portfolios include thousands of small stocks, and its value-weight Sharpe ratios at the monthly horizon (0.45
+  for 5-day pictures and 0.49 for 20-day ones, Table 4) are the closer yardstick for a mega-cap universe.
 * Training: 2000 to 2007, random 70/30 split for training and validation, early stopping, five networks per
   model, never retrained. Only pictures whose label is known by the end of 2007 are used.
 * Learning rate: the paper's 1e-5 learned too slowly with our far smaller training set (validation loss still
   above a coin flip's after two epochs), so the cache uses the rate that did best on 2000 to 2007 validation
-  loss in pilot runs: 1e-3 for the 5-day networks, and 1e-4 for the 20-day ones, which were unstable at 1e-3 (the
-  runs are listed in `build_cache.py`). No test-period number was looked at to choose either.
+  loss in pilot runs: 1e-3, chosen on I5R5 and carried over to I5R20. The uncached 20-day attempt was unstable
+  at 1e-3 and also tried 1e-4 (the runs are listed in `build_cache.py`). No test-period number was looked at to choose either.
 * The paper's 20-day network (I20R20) is not cached. On the CPU this was built on it could only train on one
   picture every 5 days, and it never beat always predicting the share of "up" on validation loss (details in
   `build_cache.py`). The monthly model is I5R20 instead (5-day pictures, 20-day returns, in the paper's Table 3).
   Training the 20-day network on a GPU is an exercise in the notebook.
+* I5R20 only ties that same base rate on validation loss and calls almost every validation picture "up". It is
+  kept because a long/short book uses only the ranking; the notebook tests that ranking out of sample and says so.
 * Costs of 5 bps per dollar traded, as in Workshops 3 and 4 (the paper deducts no trading costs).
+
+## What it finds (2008 to October 2026, out of sample)
+
+* The weekly network (I5R5) ranks stocks: rank correlation 0.018 (t 3.4), decile long/short Sharpe 0.65 before
+  costs and 0.12 after 5 bps. It has largely rediscovered weekly reversal (rank correlation 0.58 with it), which
+  earns the same before costs and 0.30 after. Most of its money came in 2008 to 2009.
+* The monthly network (I5R20) learned nothing usable: Sharpe 0.15 before costs, -0.03 after.
+* Both say "up" for most stocks, so their accuracy (54.3%, 57.6%) is no better than always saying "up".
 
 ## Refreshing
 
 ```bash
 python workshop5/fetch_data.py                                   # open/high/low ratios, about a minute
-python workshop5/build_cache.py train I5R5 --seeds 0 1 2 3 4     # CPU: about 20 minutes per network
+python workshop5/build_cache.py train I5R5 --seeds 0 1 2 3 4     # CPU: about 30 to 60 minutes per network
 python workshop5/build_cache.py train I5R20 --seeds 0 1 2 3 4
 python workshop5/build_cache.py predict I5R5 I5R20
 python workshop5/build_notebook.py
