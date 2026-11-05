@@ -246,7 +246,7 @@ def test_grad_cam_is_a_heatmap_of_the_picture():
 def test_cached_predictions_are_out_of_sample():
     if not cnn.PRED_CACHE.exists():
         pytest.skip("workshop5/data/predictions.csv.gz is not in this checkout")
-    for name in ("I5R5", "I20R20"):
+    for name in ("I5R5", "I5R20"):
         p = cnn.load_predictions(name)
         dates = p.index.get_level_values("date")
         assert dates.min() >= pd.Timestamp("2008-01-01") and p.between(0, 1).all()
@@ -258,7 +258,7 @@ def test_cached_ensembles_have_five_final_networks_each():
         pytest.skip("workshop5/data/training_history.csv is not in this checkout")
     h = pd.read_csv(cnn.HISTORY_CACHE)
     final = h[h["run"] == "final"]
-    for name in ("I5R5", "I20R20"):
+    for name in ("I5R5", "I5R20"):
         assert final[final["model"] == name]["seed"].nunique() == 5
         assert len(list(cnn.MODEL_DIR.glob(f"{name}_seed*.pt"))) == 5
 
@@ -269,7 +269,7 @@ def test_build_cache_training_labels_end_inside_2007():
     bc = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bc)
     mkt = cnn.load_market()
-    data = bc.training_images("I20R20", mkt)
+    data = bc.training_images("I5R20", mkt)
     idx = mkt.adj_close.index
     last_label_day = idx[idx.get_indexer(data.meta["date"]) + 20].max()
     assert last_label_day <= pd.Timestamp("2007-12-31") and data.meta["date"].min() >= pd.Timestamp("2000-01-01")

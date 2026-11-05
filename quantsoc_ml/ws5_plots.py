@@ -29,7 +29,7 @@ def gallery(images: Sequence[np.ndarray], titles: Sequence[str] = (), ncols: int
     n = len(images)
     nrows = int(np.ceil(n / ncols))
     h, w = images[0].shape
-    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * size, nrows * size * h / w + 0.4), squeeze=False)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * size, nrows * (size * h / w + 0.35) + 0.5), squeeze=False)
     for i, ax in enumerate(axes.flat):
         if i < n:
             show(images[i], ax, titles[i] if i < len(titles) else "")
@@ -100,8 +100,9 @@ def feature_maps(maps: np.ndarray, n: int = 8, title: str = ""):
     return fig
 
 
-def training_curves(history: pd.DataFrame, title: str = ""):
-    """Loss per epoch for each network in the ensemble; the dot marks the epoch that was kept."""
+def training_curves(history: pd.DataFrame, title: str = "", up_share: Optional[float] = None):
+    """Loss per epoch for each network in the ensemble; the dot marks the epoch that was kept.
+    up_share: share of 'up' labels, to draw what always predicting that share would score."""
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.4))
     for seed, h in history.groupby("seed"):
         axes[0].plot(h["epoch"], h["train_loss"], color=QS_GREY, lw=1)
@@ -110,6 +111,11 @@ def training_curves(history: pd.DataFrame, title: str = ""):
         axes[0].plot(best["epoch"], best["val_loss"], "o", color=QS_GOLD)
         axes[1].plot(h["epoch"], h["val_acc"] * 100, color=QS_NAVY, lw=1.2)
     axes[0].axhline(np.log(2), color=QS_RED, ls="--", lw=1, label="a coin flip (ln 2)")
+    if up_share is not None:
+        q = up_share
+        axes[0].axhline(-(q * np.log(q) + (1 - q) * np.log(1 - q)), color=QS_RED, ls=":", lw=1.2,
+                        label=f"always say {q:.0%} up")
+        axes[1].axhline(max(q, 1 - q) * 100, color=QS_RED, ls=":", lw=1.2)
     axes[0].plot([], [], color=QS_GREY, label="training loss"); axes[0].plot([], [], color=QS_NAVY, label="validation loss")
     axes[0].set_xlabel("epoch"); axes[0].set_ylabel("cross-entropy"); axes[0].legend(fontsize=8)
     axes[1].axhline(50, color=QS_RED, ls="--", lw=1)

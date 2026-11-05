@@ -2,8 +2,8 @@
 
 Usage:
     python workshop5/build_cache.py train I5R5 --seeds 0 1 2 3 4     # writes workshop5/models/I5R5_seed*.pt
-    python workshop5/build_cache.py train I20R20 --seeds 0 1 2 3 4
-    python workshop5/build_cache.py predict I5R5 I20R20               # writes workshop5/data/predictions.csv.gz
+    python workshop5/build_cache.py train I5R20 --seeds 0 1 2 3 4
+    python workshop5/build_cache.py predict I5R5 I5R20                # writes workshop5/data/predictions.csv.gz
     python workshop5/build_cache.py check
 
 Everything here was fixed before any prediction for 2008 onwards was looked at:
@@ -17,8 +17,14 @@ Everything here was fixed before any prediction for 2008 onwards was looked at:
     lr 1e-5: 0.7275, 0.7178 after epochs 1-2 (stopped: far too slow; log only, not in the history file)
     lr 1e-4: 0.7057, 0.6939, 0.7030 after epochs 1-3 (recorded in data/training_history.csv, run "lr1e-4")
     lr 1e-3: 0.7709, 0.6928, 0.6918 after epochs 1-3 (stopped there, then re-run in full as final seed 0)
-  So LEARNING_RATE is 1e-3. The 20-day networks use the same rate without a pilot of their own (a pilot
-  costs as much as a network on this CPU); that is a carried-over choice, not a tuned one.
+  So LEARNING_RATE is 1e-3 for 5-day pictures (I5R5, and I5R20 by carrying the choice over).
+* The 20-day network (I20R20) is NOT cached. On this CPU it could only be trained on one picture every
+  5 days (33,418 pictures for 708,866 parameters) and never learned: at lr 1e-3 seed 0's validation loss
+  went 1.777, 1.044, 0.703, 0.980 (accuracy down to 42.9%); at lr 1e-4 it went 0.822, 0.788, 0.798, 0.798
+  and early stopping kept 0.788, worse than always predicting the 56.9% share of up labels (0.684).
+  Training on every day's picture would take most of a day here. So the monthly model is I5R20
+  (5-day pictures, 20-day returns, the paper's Table 3 has it), and the 20-day network is left as a GPU
+  exercise in the notebook. The I20R20 settings below stay for anyone who wants to try.
 * 20-day pictures: a picture every TRAIN_EVERY trading days in training (the CPU this cache was built
   on trains about 85 pictures a second for this network), predictions every 5 days in the test.
 """
@@ -35,10 +41,10 @@ sys.path.insert(0, str(HERE.parent))
 from quantsoc_ml import cnn  # noqa: E402
 
 TRAIN_START, TRAIN_END, TEST_START = "2000-01-01", "2007-12-31", "2008-01-01"
-MODELS = {"I5R5": dict(days=5, horizon=5), "I20R20": dict(days=20, horizon=20)}
-LEARNING_RATE = {"I5R5": 1e-3, "I20R20": 1e-3}          # chosen by the pilot runs, see the docstring
-TRAIN_EVERY = {"I5R5": 1, "I20R20": 5}
-PREDICT_EVERY = {"I5R5": 1, "I20R20": 5}
+MODELS = {"I5R5": dict(days=5, horizon=5), "I5R20": dict(days=5, horizon=20), "I20R20": dict(days=20, horizon=20)}
+LEARNING_RATE = {"I5R5": 1e-3, "I5R20": 1e-3, "I20R20": 1e-4}          # chosen by the pilot runs, see the docstring
+TRAIN_EVERY = {"I5R5": 1, "I5R20": 1, "I20R20": 5}
+PREDICT_EVERY = {"I5R5": 5, "I5R20": 5, "I20R20": 5}
 
 
 def training_images(name: str, mkt: cnn.Market) -> cnn.ImageSet:

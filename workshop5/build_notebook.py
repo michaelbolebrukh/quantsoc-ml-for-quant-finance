@@ -243,7 +243,10 @@ md("""
 A label is 1 if the stock's return over the next $h$ days is positive, 0 otherwise. Two models are cached:
 
 * **I5R5**: 5-day pictures, is the next **week** up? (the paper's strongest result, Table 6)
-* **I20R20**: 20-day pictures, is the next **month** up? (the paper's headline, Table 3)
+* **I5R20**: the same 5-day pictures, is the next **month** (20 trading days) up? (Table 3, where it is the
+  paper's best monthly model: equal-weight Sharpe 2.35, value-weight 0.45)
+
+The paper's headline 20-day pictures (I20R20) are drawn and built in parts 3 and 6, but not cached: see part 7.
 
 Training uses pictures from 2000 to 2007 only, and only those whose label is also known by the end of 2007, so
 no price from the test years leaks in.
@@ -364,8 +367,8 @@ display(pd.DataFrame(rows))
 print(cnn.build_cnn(20))
 ''')
 md("""
-*Discuss:* the 20-day network has about 700,000 parameters. Our training set has about 170,000 five-day pictures,
-and the paper's had millions. What stops a model with more knobs than examples from just memorising them? (Hint:
+*Discuss:* the 5-day network has about 155,000 parameters and the 20-day one about 700,000. Our training set
+has about 170,000 five-day pictures, and the paper's had millions. What stops a model with more knobs than examples from just memorising them? (Hint:
 the weight sharing of convolution, dropout, and stopping early. The paper says the *effective* number of
 parameters is much smaller than the count.)
 """)
@@ -378,34 +381,44 @@ The recipe (sec. 3.3): cross-entropy loss, the Adam optimiser, batches of 128 pi
 pictures standardised by the training set's pixel mean and spread, and **early stopping**: after each pass over
 the data (an *epoch*), check the loss on the 30% validation pictures and stop once it has not improved for two
 epochs in a row (we keep the best epoch's weights; the paper does not say). Five networks from five random
-starts, averaged. For the 20-day networks we used one training picture every 5 days per stock, a fifth of the
-pictures, to fit the CPU they were trained on.
+starts, averaged.
+
+**What did not work: the 20-day network.** Its pictures are 16 times bigger, and on the laptop CPU this cache was
+built on it trains at about 85 pictures a second, so we tried it on one picture every 5 days per stock (33,418
+pictures for 708,866 parameters). It never learned: its validation loss stayed above that of simply always
+predicting the training years' 57% share of "up", at either learning rate we tried. With a fifth of the data it
+had too little to learn from, so the monthly model here is I5R20. Exercise E is to do better on a GPU.
 
 Training all of that took a while on a laptop CPU, so the networks are cached (`workshop5/build_cache.py`
 trained them with the code you see here). Their training curves:
 """)
 code('''
 hist = pd.read_csv(cnn.HISTORY_CACHE)
-for name in ("I5R5", "I20R20"):
+train5m = cnn.make_images(mkt.window("2000-01-01", "2007-12-31"), days=5, horizon=20, every=5)
+up_share = {"I5R5": train5.meta.label.mean(), "I5R20": train5m.meta.label.mean()}
+for name in ("I5R5", "I5R20"):
     h = hist[(hist.model == name) & (hist.run == "final")]
-    plots.training_curves(h, f"{name}: five networks, {int(h.n_pictures.iloc[0]):,} pictures from 2000 to 2007, learning rate {h.lr.iloc[0]:g}")
+    plots.training_curves(h, f"{name}: five networks, {int(h.n_pictures.iloc[0]):,} pictures from 2000 to 2007, "
+                             f"learning rate {h.lr.iloc[0]:g}", up_share[name])
 ''')
 md("""
-Two things to notice. The validation loss barely moves below the red line, **ln 2 = 0.693**, which is the loss of
-a model that always says 50/50. And validation accuracy sits only just above 50%. Stock returns are mostly noise;
+Two things to notice. The validation loss barely gets below the red lines: **ln 2 = 0.693** is the loss of a
+model that always says 50/50, and the dotted line is a model that always says the training years' share of "up"
+(57% for months, 53% for weeks), which knows nothing about any one stock. Accuracy sits close to that share too. Stock returns are mostly noise;
 the paper's own validation loss for its 20-day model was 0.687 (Table 18). A little signal in a lot of noise is the whole game.
 
 **One change from the paper: the learning rate.** The paper uses 1e-5 (how big a step the optimiser takes).
 We have about 100 stocks instead of thousands, so far fewer steps per epoch, and at 1e-5 our networks were
 still worse than a coin flip after two epochs. Pilot runs compared 1e-5, 1e-4 and 1e-3 on the 2000 to 2007
-**validation** pictures only, and 1e-3 did best, so the cache uses it. One honest caveat, shared with the paper:
+**validation** pictures only, and 1e-3 did best for I5R5, so I5R20 uses it too. One honest caveat, shared with the paper:
 validation pictures come from the same days and stocks as training pictures, so they are not fully independent,
 and early stopping on them is a little optimistic. The 2008 onwards test is untouched either way.
 
 **Train one yourself.** This trains a fresh 5-day network on a sample of the training pictures. Expect a minute
-or two per epoch on Colab's CPU and seconds on a GPU. Do not expect much: with 20,000 pictures the validation
-accuracy will hover around 50% to 52%. The point is to watch the mechanics (losses falling, early stopping),
-then compare with the cached networks trained on all 171,000.
+or two per epoch on Colab's CPU and seconds on a GPU. Do not expect much. The cached networks also started worse
+than a coin flip (a first validation loss of about 0.77) and needed several epochs over 120,000 pictures to settle;
+with 20,000 pictures and 3 epochs, yours will probably still be jumping about, with accuracy near 50%. That is the
+point: watch the training loss fall while the validation loss refuses to follow, then try `N = 100_000` on a GPU.
 """)
 code('''
 N, EPOCHS = 20_000, 3
@@ -431,10 +444,10 @@ correlation, which a single wild return cannot dominate. For the benchmarks, "up
 """)
 code('''
 TEST_START = "2008-01-01"
-probs = {name: cnn.load_predictions(name) for name in ("I5R5", "I20R20")}
+probs = {name: cnn.load_predictions(name) for name in ("I5R5", "I5R20")}
 bench = cnn.benchmark_signals(mkt.adj_close)
 rows = {}
-for name, h in (("I5R5", 5), ("I20R20", 20)):
+for name, h in (("I5R5", 5), ("I5R20", 20)):
     p = probs[name]
     dates = mkt.adj_close.loc[TEST_START:].index[::h]                  # one forecast per holding period
     fwd = cnn.forward_returns(mkt.adj_close, h).loc[dates].stack()
@@ -452,9 +465,9 @@ display(table.style.format({"accuracy": "{:.1%}", "correlation": "{:.3f}", "rank
                             "accuracy t-stat": "{:.1f}", "rank corr. t-stat": "{:.1f}", "periods": "{:.0f}"}))
 ''')
 md("""
-**How to read it.** A t-statistic above about 2 means the average is unlikely to be luck. Compare with the paper:
-20-day pictures for the 20-day horizon had 53.3% accuracy and a 3.4% correlation (Table 2; 5.9% rank correlation,
-Table 18); WSTR 51.0% and 2.8%. The paper has no accuracy table for 5-day horizons. Accuracy is
+**How to read it.** A t-statistic above about 2 means the average is unlikely to be luck. Compare with the paper
+(Table 2): 5-day pictures for the 20-day horizon had 52.5% accuracy and a 3.1% correlation; WSTR 51.0% and 2.8%;
+MOM 52.1% and 1.8%. The paper has no accuracy table for 5-day horizons. Accuracy is
 also blown about by the market: in a rising month most stocks go up, so a model that says "up" a lot looks clever.
 The correlation, which only cares about ranking stocks against each other, is the fairer score for a long/short
 book. And remember Workshop 3's lesson on multiple testing: this table holds eight signals, so one t-statistic
@@ -476,7 +489,7 @@ code('''
 def wide(s):
     return s.unstack("symbol")
 
-strategies = {"CNN I5R5 (weekly)": (wide(probs["I5R5"]), 5), "CNN I20R20 (monthly)": (wide(probs["I20R20"]), 20),
+strategies = {"CNN I5R5 (weekly)": (wide(probs["I5R5"]), 5), "CNN I5R20 (monthly)": (wide(probs["I5R20"]), 20),
               "WSTR (weekly)": (bench["WSTR"], 5), "WSTR (monthly)": (bench["WSTR"], 20),
               "STR (monthly)": (bench["STR"], 20), "MOM (monthly)": (bench["MOM"], 20)}
 bts = {k: cnn.decile_backtest(s, mkt.adj_close, h, start=TEST_START) for k, (s, h) in strategies.items()}
@@ -491,7 +504,7 @@ network has learned something, the bars should rise from decile 1 to decile 10.
 """)
 code('''
 dec = pd.DataFrame({k: bts[k].deciles.mean() * 252 / bts[k].horizon * 100
-                    for k in ("CNN I5R5 (weekly)", "CNN I20R20 (monthly)", "WSTR (weekly)")})
+                    for k in ("CNN I5R5 (weekly)", "CNN I5R20 (monthly)", "WSTR (weekly)")})
 plots.deciles(dec, "Average return of each decile, annualised, 2008 to 2026 (before costs)");
 ''')
 md("""
@@ -515,16 +528,17 @@ much the score for a class ("up" or "down") would rise if each map were stronger
 sensitivity, adds them up and keeps the positive part: a heatmap of the regions that pushed the network
 towards that class. The paper drew 10 "up" and 10 "down" pictures at random from 2019 (Figure 13) and saw the
 network fire on days with a **wide high-low range**, attend to **open and close ticks**, and light up the **top**
-of "up" pictures and the **bottom** of "down" ones. A similar look at our 20-day networks, using the 5 most
-confident calls each way and the first of the five networks:
+of "up" pictures and the **bottom** of "down" ones. The paper looked at its 20-day network; ours is the 5-day
+monthly network (I5R20), with 2 blocks, using the 5 most confident calls each way and the first of the five
+networks:
 """)
 code('''
-nets20 = cnn.load_ensemble("I20R20")
-p19 = probs["I20R20"].loc["2019"]
+nets5m = cnn.load_ensemble("I5R20")
+p19 = probs["I5R20"].loc["2019"]
 up, down = p19.nlargest(5).index, p19.nsmallest(5).index
 for title, idx, target in (("Most confident 'up' calls in 2019", up, 1), ("Most confident 'down' calls in 2019", down, 0)):
-    imgs = cnn.draw_images(days=20, **cnn.chart_inputs(mkt, 20, [d for d, s in idx], [s for d, s in idx]))
-    cams = [[cnn.grad_cam(nets20[0], im, block=b, target=target) for b in range(3)] for im in imgs]
+    imgs = cnn.draw_images(days=5, **cnn.chart_inputs(mkt, 5, [d for d, s in idx], [s for d, s in idx]))
+    cams = [[cnn.grad_cam(nets5m[0], im, block=b, target=target) for b in range(2)] for im in imgs]
     plots.cam_grid(imgs, cams, [f"{s} {d:%d %b}" for d, s in idx], title)
 ''')
 md("""
@@ -540,7 +554,7 @@ known = {"WSTR (minus last week's return)": bench["WSTR"], "STR (minus last mont
          "MOM (12 to 1 month return)": bench["MOM"], "volatility (last 20 days)": ret.rolling(20).std(),
          "dollar volume (last 20 days)": (mkt.adj_close * mkt.volume).rolling(20).mean()}
 rows = {}
-for name, h in (("I5R5", 5), ("I20R20", 20)):
+for name, h in (("I5R5", 5), ("I5R20", 20)):
     p = probs[name]
     dates = mkt.adj_close.loc[TEST_START:].index[::h]
     p = p[p.index.get_level_values("date").isin(dates)]
@@ -578,7 +592,7 @@ ml_net = ml.net.set_axis(idx[idx.get_indexer(ml.net.index) + 1])
 ou = al.load_cached("etf")
 three = pd.DataFrame({"W3 machine learning (daily)": ml_net, "W4 OU stat arb (daily)": ou.net,
                       "W5 CNN I5R5 (weekly)": bts["CNN I5R5 (weekly)"].daily_net,
-                      "W5 CNN I20R20 (monthly)": bts["CNN I20R20 (monthly)"].daily_net}).loc[TEST_START:].dropna()
+                      "W5 CNN I5R20 (monthly)": bts["CNN I5R20 (monthly)"].daily_net}).loc[TEST_START:].dropna()
 stats = pd.DataFrame({c: perf_stats(three[c]) for c in three}).T
 display(stats[["annual return", "annual vol", "Sharpe", "max drawdown"]].round(3))
 display(three.corr().round(2).style.set_caption("Correlation of daily returns"))
@@ -628,7 +642,7 @@ prob4 = cnn.predict(nets5, pics4.images, device=DEVICE)
 scores = pd.Series(prob4, index=pd.MultiIndex.from_frame(pics4.meta[["date", "symbol"]])).unstack("symbol")
 transfer = cnn.decile_backtest(scores, bars4.adj_close, horizon=5, start=TEST_START, bars_per_year=252 / 4)
 print("transfer, 20 days ahead:", {k: round(v, 2) for k, v in transfer.paper_stats().items()})
-print("I20R20 for comparison:  ", {k: round(v, 2) for k, v in bts["CNN I20R20 (monthly)"].paper_stats().items()})
+print("I5R20 for comparison:   ", {k: round(v, 2) for k, v in bts["CNN I5R20 (monthly)"].paper_stats().items()})
 ''')
 md("""
 **B. Is the ensemble worth it?** Score the test pictures with one network instead of five, rebuild the I5R5
@@ -642,8 +656,11 @@ More diversified, less extreme. Better or worse after costs?
 `ma_line=False` (pass them through `cnn.draw_images`). The paper found the moving average and volume help 20 and
 60-day pictures but not 5-day ones (Table 17).
 
-**E. The 60-day network.** It has 3 million parameters and wants a GPU. In Colab with a T4, build 60-day
-pictures with `every=5` and train one with `cnn.train_cnn(..., days=60, horizon=60)`.
+**E. Make the 20-day network learn (GPU).** Part 7 says it failed on a CPU with a fifth of the pictures. In Colab
+with a T4 GPU, build 20-day training pictures for every day
+(`cnn.make_images(mkt.window("2000-01-01", "2007-12-31"), 20, 20)`, about 170,000), train one network with
+`cnn.train_cnn(..., days=20, horizon=20, lr=1e-4, device="cuda")`, and see whether its validation loss beats
+always predicting the share of "up". The 60-day network (3 million parameters) is the same exercise, bigger.
 """)
 code('''
 # your code here
