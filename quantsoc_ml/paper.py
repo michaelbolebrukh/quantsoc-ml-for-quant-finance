@@ -48,6 +48,7 @@ MODES = ("preview", "submit")
 MARKET_TZ = "America/New_York"
 CLIENT_ID_PREFIX = "qsml"
 BAR_COLUMNS = ["date", "symbol", "close", "adj_close", "volume"]
+OHLC_COLUMNS = ["date", "symbol", "open", "high", "low", "close", "adj_close", "volume"]   # Workshop 5 draws charts
 ORDER_COLUMNS = ["symbol", "side", "qty", "notional", "current_qty", "target_qty", "action"]
 LINE = "=" * 78
 
@@ -204,6 +205,40 @@ def fetch_daily_bars(symbols: Sequence[str], lookback_days: int, client, feed: s
     return out[out["date"].isin(keep)][BAR_COLUMNS].reset_index(drop=True)
 
 
+def fetch_daily_ohlc_bars(symbols: Sequence[str], lookback_days: int, client, feed: str = "iex") -> pd.DataFrame:
+    """Like `fetch_daily_bars`, but with each day's open, high and low too: [date, symbol, open, high, low, close, adj_close, volume].
+
+    Added for Workshop 5, whose price charts need the whole bar. `fetch_daily_bars` is untouched. The
+    request is the same (TimeFrame.Day, adjustment="all"), so open, high, low and close are all
+    scaled by the same factor on each day and ratios such as open / close are the true ones.
+    """
+    from alpaca.data.enums import Adjustment, DataFeed
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    end = pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(days=int(math.ceil(int(lookback_days) * 365 / 252)) + 14)
+    req = StockBarsRequest(symbol_or_symbols=list(symbols), timeframe=TimeFrame.Day, start=start.to_pydatetime(),
+                           end=end.to_pydatetime(), adjustment=Adjustment.ALL, feed=DataFeed(feed))
+    try:
+        barset = client.get_stock_bars(req)
+    except Exception as e:  # alpaca APIError, network errors: the message carries no credential
+        raise BrokerError(f"could not download daily bars from Alpaca: {e}") from e
+    df = barset.df
+    if df is None or len(df) == 0:
+        return pd.DataFrame(columns=OHLC_COLUMNS)
+    df = df.reset_index()
+    ts = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(MARKET_TZ)
+    out = pd.DataFrame({"date": ts.dt.tz_localize(None).dt.normalize(), "symbol": df["symbol"].astype(str),
+                        "open": df["open"].astype(float), "high": df["high"].astype(float),
+                        "low": df["low"].astype(float), "close": df["close"].astype(float),
+                        "volume": df["volume"].astype(float)})
+    out["adj_close"] = out["close"]
+    out = out.sort_values(["date", "symbol"])
+    keep = sorted(out["date"].unique())[-int(lookback_days):]
+    return out[out["date"].isin(keep)][OHLC_COLUMNS].reset_index(drop=True)
+
+
 def build_panels(bars: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """(prices_wide, volume_wide), dates down and symbols across, from a long bar table.
 
@@ -341,7 +376,7 @@ class ReadOnlyBroker:
     """A view of a broker with every read method and NO submit method. The preview path only gets this."""
 
     __slots__ = ("_b",)
-    READ_METHODS = ("account", "positions", "open_orders", "clock", "daily_bars", "shortable")
+    READ_METHODS = ("account", "positions", "open_orders", "clock", "daily_bars", "shortable", "daily_ohlc_bars")
 
     def __init__(self, broker):
         object.__setattr__(self, "_b", broker)
@@ -367,6 +402,9 @@ class ReadOnlyBroker:
 
     def shortable(self, symbol) -> Optional[bool]:
         return self._b.shortable(symbol)
+
+    def daily_ohlc_bars(self, symbols, lookback_days) -> pd.DataFrame:
+        return self._b.daily_ohlc_bars(symbols, lookback_days)
 
     def __setattr__(self, key, value):
         raise AttributeError("ReadOnlyBroker cannot be changed")
@@ -403,13 +441,13 @@ class AlpacaPaperBroker:
         try:
             return fn(*args)
         except Exception as e:
-            raise BrokerError(self.scrub(f"Alpaca request failed: {e}")) from e
+            raise BrokerError(self.scrub(f"Alpaca request failed: {e}")) from None
 
     def _guarded(self, fn, *args):
         try:
             return fn(*args)
         except Exception as e:
-            raise BrokerError(self.scrub(e)) from e
+            raise BrokerError(self.scrub(e)) from None
 
     def account(self) -> AccountInfo:
         a = self._call(self._trading.get_account)
@@ -438,6 +476,9 @@ class AlpacaPaperBroker:
     def daily_bars(self, symbols, lookback_days) -> pd.DataFrame:
         return self._guarded(fetch_daily_bars, symbols, lookback_days, self._data, self.feed)
 
+    def daily_ohlc_bars(self, symbols, lookback_days) -> pd.DataFrame:
+        return self._guarded(fetch_daily_ohlc_bars, symbols, lookback_days, self._data, self.feed)
+
     def shortable(self, symbol) -> Optional[bool]:
         try:
             a = self._trading.get_asset(symbol)
@@ -453,7 +494,7 @@ class AlpacaPaperBroker:
         try:
             o = self._trading.submit_order(req)
         except Exception as e:
-            raise BrokerError(self.scrub(f"order rejected by Alpaca: {e}")) from e
+            raise BrokerError(self.scrub(f"order rejected by Alpaca: {e}")) from None
         deadline = time.time() + self.wait_seconds
         status = str(getattr(o.status, "value", o.status))
         while status not in ("filled", "rejected", "canceled", "expired") and time.time() < deadline:
@@ -527,6 +568,20 @@ class MockBroker:
         if "close" not in df:
             df["close"] = df["adj_close"]
         return df[BAR_COLUMNS].reset_index(drop=True)
+
+    def daily_ohlc_bars(self, symbols, lookback_days) -> pd.DataFrame:
+        """Bars with open, high and low too (Workshop 5). The `bars` given to the mock must carry those columns."""
+        if self.bars is None:
+            return pd.DataFrame(columns=OHLC_COLUMNS)
+        missing = [c for c in ("open", "high", "low") if c not in self.bars]
+        if missing:
+            raise BrokerError(f"the mock's bars have no {', '.join(missing)} column(s), so OHLC bars are not available")
+        df = self.bars[self.bars["symbol"].isin(list(symbols))]
+        keep = sorted(df["date"].unique())[-int(lookback_days):]
+        df = df[df["date"].isin(keep)].copy()
+        if "close" not in df:
+            df["close"] = df["adj_close"]
+        return df[OHLC_COLUMNS].reset_index(drop=True)
 
     def shortable(self, symbol) -> Optional[bool]:
         return symbol not in self.not_shortable
